@@ -1,0 +1,25 @@
+# 환경 변수 (API 키) - 절대 커밋 금지
+.env
+
+# 데이터 (RFP 원본, 전처리 결과, 벡터DB) - git에 올리지 않음
+data/*
+!data/README.md
+
+# 평가 결과
+eval/results/
+
+# Python / uv
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS / IDE
+.DS_Store
+.vscode/
+.idea/

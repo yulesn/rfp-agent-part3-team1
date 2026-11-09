@@ -1,0 +1,29 @@
+# 실험 설정 파일
+# 코드에 숫자/모델명을 직접 쓰지 말고 여기서 바꿔가며 실험하세요.
+# 새 실험 설정이 필요하면 이 파일을 복사해서 configs/exp_청크500.yaml 처럼 만들고,
+# 결과는 노션 「실험 로그」에 설정 파일 이름과 함께 기록합니다.
+
+paths:
+  raw_dir: data/raw              # RFP 원본 (hwp, pdf)
+  metadata_file: data/raw/data_list.csv   # 제공받은 메타데이터 파일 (이름은 받은 파일에 맞게 수정)
+  processed_dir: data/processed  # 파싱 결과 (jsonl)
+  vectorstore_dir: data/vectorstore  # Chroma 저장 위치
+
+chunking:
+  chunk_size: 1000
+  chunk_overlap: 200
+
+embedding:
+  provider: openai               # openai | huggingface
+  model: text-embedding-3-small
+
+vectorstore:
+  collection_name: rfp
+
+retrieval:
+  top_k: 5
+
+llm:
+  provider: openai               # openai | local
+  model: gpt-4o-mini
+  temperature: 0
