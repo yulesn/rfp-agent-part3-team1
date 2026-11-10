@@ -1,4 +1,4 @@
-"""[문서 파싱] HWP 파서
+"""[문서 처리] HWP 파서
 
 - HWP 1개를 읽어서 텍스트(str)를 돌려주는 함수를 작성합니다.
 - HWP는 OLE 구조라서 olefile 로 "BodyText/Section*" 스트림을 열고 zlib 압축을 풀어 텍스트를 꺼낼 수 있습니다.

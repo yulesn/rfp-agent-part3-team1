@@ -1,4 +1,4 @@
-"""[검색] 임베딩 모델
+"""[RAG] 임베딩 모델
 
 - config["embedding"] 에 따라 임베딩 객체를 만들어 돌려줍니다.
 - 기본은 OpenAI text-embedding-3-small. 한국어 오픈소스 임베딩(예: bge-m3, ko-sroberta)과 비교 실험해 보고

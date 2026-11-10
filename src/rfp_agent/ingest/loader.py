@@ -1,4 +1,4 @@
-"""[문서 파싱] 전체 문서 로딩
+"""[문서 처리] 전체 문서 로딩
 
 - data/raw 폴더의 모든 파일을 확장자에 맞는 파서(hwp.py, pdf.py)로 읽고,
   메타데이터(metadata.py)를 붙여서 ParsedDocument 목록을 돌려줍니다.

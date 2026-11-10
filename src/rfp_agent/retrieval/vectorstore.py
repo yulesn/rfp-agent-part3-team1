@@ -1,4 +1,4 @@
-"""[검색] 벡터DB (Chroma)
+"""[RAG] 벡터DB (Chroma)
 
 - 별도 서버 없이 Chroma 를 로컬 폴더(data/vectorstore)에 파일로 저장해서 씁니다.
 - build_vectorstore: 청크 목록을 임베딩해서 저장 (scripts/build_index.py 에서 호출)

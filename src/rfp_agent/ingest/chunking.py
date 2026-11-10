@@ -1,4 +1,4 @@
-"""[문서 파싱 → 검색] 청킹
+"""[문서 처리] 청킹
 
 - ParsedDocument 를 검색 단위(청크)로 나눠서 LangChain Document 목록으로 돌려줍니다.
 - 각 청크의 metadata 에는 원본 문서의 metadata(doc_id, 발주기관, 사업금액 등)를 그대로 복사해 주세요.

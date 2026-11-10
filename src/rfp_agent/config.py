@@ -1,4 +1,4 @@
-"""[PM·통합] 설정 불러오기
+"""[공통] 설정 불러오기
 
 - configs/*.yaml 과 .env 를 읽어서 다른 모듈이 같은 설정을 쓰게 해 주는 파일입니다.
 - 다른 파일에서는 `from rfp_agent.config import load_config` 로 불러서 씁니다.

@@ -22,3 +22,11 @@ def test_imports():
     import rfp_agent.agent.graph
     import rfp_agent.ingest.loader
     import rfp_agent.retrieval.retriever  # noqa: F401
+
+
+def test_api_health():
+    from fastapi.testclient import TestClient
+
+    from rfp_agent.api.main import app
+
+    assert TestClient(app).get("/health").json() == {"status": "ok"}

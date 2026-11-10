@@ -1,4 +1,4 @@
-"""[평가·데모] 평가 스크립트
+"""[프론트·백엔드·평가] 평가 스크립트
 
 eval/questions.jsonl 의 질문을 에이전트에 넣고, evaluation/metrics.py 의 지표로 채점해서
 eval/results/ 에 결과(질문별 답변·점수 + 평균 점수)를 저장합니다.
