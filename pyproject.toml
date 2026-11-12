@@ -10,6 +10,7 @@ dependencies = [
     "langchain-core>=0.3",
     "langchain-community>=0.3",
     "langchain-openai>=0.2",
+    "langchain-ollama>=1.1.0",   # GCP VM 오픈소스 모델
     "langchain-chroma>=0.1",
     "langgraph>=0.2",
     # 벡터DB (서버 없이 로컬 파일로 저장)

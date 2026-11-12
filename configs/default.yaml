@@ -24,6 +24,6 @@ retrieval:
   top_k: 5
 
 llm:
-  provider: openai               # openai | local
+  provider: openai               # openai | ollama (configs/ollama.yaml 참고)
   model: gpt-4o-mini
   temperature: 0

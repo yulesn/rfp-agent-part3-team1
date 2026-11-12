@@ -1,0 +1,29 @@
+# default.yaml 에서 llm 만 Ollama(gemma4:12b)로 바꾼 설정
+# 실행: uv run python scripts/ask.py "질문" --config configs/ollama.yaml
+
+paths:
+  raw_dir: data/raw              # RFP 원본 (hwp, pdf)
+  metadata_file: data/raw/data_list.csv   # 제공받은 메타데이터 파일 (이름은 받은 파일에 맞게 수정)
+  processed_dir: data/processed  # 파싱 결과 (jsonl)
+  vectorstore_dir: data/vectorstore  # Chroma 저장 위치
+
+chunking:
+  chunk_size: 1000
+  chunk_overlap: 200
+
+embedding:
+  provider: openai               # openai | huggingface
+  model: text-embedding-3-small
+
+vectorstore:
+  collection_name: rfp
+
+retrieval:
+  top_k: 5
+
+llm:
+  provider: ollama               # GCP VM Ollama 서버 (SSH 터널 필요)
+  model: gemma4:12b
+  base_url: http://localhost:11434
+  num_ctx: 8192
+  temperature: 0
