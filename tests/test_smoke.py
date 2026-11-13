@@ -30,3 +30,12 @@ def test_api_health():
     from rfp_agent.api.main import app
 
     assert TestClient(app).get("/health").json() == {"status": "ok"}
+
+
+def test_get_llm_ollama():
+    from rfp_agent.config import load_config
+    from rfp_agent.llm import get_llm
+
+    llm = get_llm(load_config("configs/ollama.yaml"))
+    assert llm.model == "gemma4:12b"
+    assert llm.num_ctx == 8192
