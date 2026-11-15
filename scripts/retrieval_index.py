@@ -106,6 +106,9 @@ def main() -> None:
                 )
     except (ValueError, OSError) as exc:
         parser.exit(1, f"실행 실패: {exc}\n")
+    except Exception as exc:  # noqa: BLE001 -- CLI 경계에서 외부 오류 본문을 숨깁니다.
+        # 외부 API 오류 응답에 키 일부가 포함될 수 있어 본문을 출력하지 않습니다.
+        parser.exit(1, f"실행 실패: {type(exc).__name__}, HTTP {getattr(exc, 'status_code', None)}\n")
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
