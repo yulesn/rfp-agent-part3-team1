@@ -1,0 +1,14 @@
+# 공개 가상 문서 3건으로 검색 연결을 확인합니다. 팀 DB와 분리합니다.
+paths:
+  processed_dir: data/processed/retrieval_demo
+  vectorstore_dir: data/vectorstore_demo_openai_v1
+chunking:
+  chunk_size: 1000
+  chunk_overlap: 200
+embedding:
+  provider: openai
+  model: text-embedding-3-small
+vectorstore:
+  collection_name: rfp_demo_v1
+retrieval:
+  top_k: 5
