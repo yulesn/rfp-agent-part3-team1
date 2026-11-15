@@ -3,6 +3,77 @@
 검색 담당 김원태. 청크 → OpenAI 임베딩 → 로컬 Chroma → `retrieve()` → 본문·출처 반환을 구현했습니다.
 답변 생성 LLM과 임베딩 모델은 별개입니다. 이 검색 단계에는 Ollama 답변 생성 서버가 필요하지 않습니다.
 
+## 팀원이 처음 실행할 때
+
+현재 코드는 `retrieval/day2-sample-baseline` 브랜치에 있습니다. main에는 아직 병합하지 않았습니다.
+Codex나 특정 PC의 폴더 없이, Python 3.11 또는 3.12와 uv가 있는 환경에서 실행합니다.
+
+```bash
+git clone --branch retrieval/day2-sample-baseline --single-branch https://github.com/yulesn/rfp-agent-part3-team1.git
+cd rfp-agent-part3-team1
+uv sync --frozen
+
+# API 키·원본 자료 없이 실행하는 자동 테스트와 입력 검사
+uv run pytest
+uv run python scripts/retrieval_index.py --config configs/retrieval_demo.yaml validate --chunks examples/retrieval_demo/chunks.jsonl
+```
+
+공개 가상 문서 3건과 확인 질문은 `examples/retrieval_demo/`에 포함했습니다. 팀 원본 자료와 다릅니다.
+자동 테스트는 테스트 전용 벡터를 쓰므로 실제 의미 검색 품질을 보장하지 않습니다.
+
+실제 검색은 `.env.example`을 `.env`로 복사하고 `OPENAI_API_KEY`를 설정한 후 실행합니다.
+파일 복사는 VS Code 탐색기에서도 가능합니다. 아래 build는 처음 한 번만 실행합니다.
+
+```bash
+uv run python scripts/retrieval_index.py --config configs/retrieval_demo.yaml build --chunks examples/retrieval_demo/chunks.jsonl --report data/processed/retrieval_demo/build-report.json
+uv run python scripts/retrieval_index.py --config configs/retrieval_demo.yaml inspect
+uv run python scripts/check_retrieval.py --report data/processed/retrieval_demo/search-check.json
+uv run streamlit run app/retrieval_demo.py --server.address 127.0.0.1
+```
+
+브라우저에서 터미널에 나온 주소(기본 `http://127.0.0.1:8501`)를 엽니다. DB와 키가 없으면 준비 안내가 나오며 검색은 비활성화됩니다.
+화면만 여는 것은 API를 호출하지 않습니다. 검색 버튼을 누르면 질문 임베딩 요청이 발생합니다.
+예제 질문은 "한빛시청 도서관 통합 시스템의 사업 예산과 기간은?"이며 근거는 150,000,000원·4개월입니다.
+확인 스크립트는 질문 3건 모두 1순위에 정답 문서와 근거가 있는지 검사합니다.
+이 결과는 예제의 연결 확인이며 팀 전체 문서의 성능 평가가 아닙니다.
+
+### 화면이 검색 코드를 호출하는 구조
+
+```mermaid
+flowchart LR
+    Q[Streamlit 질문 입력] --> R[retrieve]
+    R --> E[질문 임베딩]
+    E --> D[기존 Chroma 검색]
+    D --> V[관련 원문·출처 표시]
+```
+
+화면 코드는 `app/retrieval_demo.py`에 있습니다. 아래 한 줄이 기존 검색 모듈과의 연결입니다.
+
+```python
+# 화면은 입력과 결과 표시를 맡고, 검색은 공통 함수를 그대로 사용합니다.
+documents = retrieve(question, config)
+```
+
+각자 PC에서 같은 코드를 실행하는 로컬 앱입니다. 다른 사람의 localhost 주소에 접속하는 방식이 아닙니다.
+팀의 최종 채팅 UI(`app/streamlit_app.py`)와 별도이며 답변 생성 에이전트는 호출하지 않습니다.
+
+### 팀 DB를 받아서 검색할 때
+
+Drive에서 받은 팀 DB 폴더 전체를 `data/vectorstore/`에 놓고 같은 모델·컬렉션 설정을 사용합니다.
+이미 받은 DB를 다시 임베딩할 필요는 없습니다. 질문 임베딩용 API 키는 각 실행 환경에 설정합니다.
+
+```bash
+uv run streamlit run app/retrieval_demo.py --server.address 127.0.0.1 -- --config configs/default.yaml
+```
+
+### Colab에서 실행할 때
+
+`notebooks/02_wontae_retrieval_check.ipynb`를 Colab에서 열고 위에서부터 실행합니다.
+노트북은 같은 브랜치를 받아 uv.lock으로 환경을 맞추고 검사·DB 생성·검색 코드를 호출합니다.
+키는 Colab 보안 비밀 `OPENAI_API_KEY` 또는 숨김 입력으로 받으며 코드나 출력에 저장하지 않습니다.
+마지막 셀의 `input()`에서 질문을 입력합니다. Colab에서는 웹 화면을 외부로 공개하지 않고 노트북으로 검색을 확인합니다.
+임베딩은 API에서 계산하므로 GPU 런타임은 필요하지 않습니다.
+
 ## 환경과 입력
 
 저장소 루트에서 Python 3.11 또는 3.12로 실행합니다.
