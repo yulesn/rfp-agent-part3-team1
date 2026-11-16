@@ -71,6 +71,11 @@ uv run python scripts/evaluate.py         # 평가
 
 벡터DB는 별도 서버 없이 Chroma 를 `data/vectorstore/` 에 파일로 저장합니다.
 
+문서 처리 구현 전에도 [검색 실행 가이드](docs/retrieval.md)에 따라 CSV 텍스트 또는 전달받은 청크로
+임베딩·Chroma 저장·검색을 확인할 수 있습니다. 샘플 DB는 팀 전체 DB와 별도 경로에 생성합니다.
+가상 문서 예제와 `app/retrieval_demo.py`의 질문 입력 화면, Colab용
+`notebooks/02_wontae_retrieval_check.ipynb`도 같은 가이드에서 실행할 수 있습니다.
+
 ## 파트별 담당 파일
 
 각 파일 맨 위 주석에 작성할 내용이 적혀 있습니다. `TODO` 부분을 채워 주세요.

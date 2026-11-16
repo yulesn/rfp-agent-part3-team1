@@ -1,0 +1,3 @@
+{"id": "demo-001", "question": "한빛시청 도서관 통합 시스템의 사업 예산과 기간은?", "answer": "150,000,000원, 계약일로부터 4개월", "answer_doc_ids": ["demo_library.txt"], "evidence": ["150,000,000원", "4개월"], "type": "단일문서-사실", "max_rank": 1}
+{"id": "demo-002", "question": "새봄대학교 학사 포털 개편에서 개선하는 기능은 무엇인가?", "answer": "수강 신청, 성적 조회, 졸업 요건 확인, 모바일 접근성", "answer_doc_ids": ["demo_campus.txt"], "evidence": ["수강 신청", "성적 조회", "졸업 요건"], "type": "단일문서-사실", "max_rank": 1}
+{"id": "demo-003", "question": "푸른재단 통계 조사 시스템 개선의 사업 예산은 얼마인가?", "answer": "90,000,000원", "answer_doc_ids": ["demo_survey.txt"], "evidence": ["90,000,000원"], "type": "단일문서-사실", "max_rank": 1}

@@ -7,9 +7,37 @@
 
 from langchain_core.tools import tool
 
+from rfp_agent.config import load_config
+from rfp_agent.retrieval.retriever import retrieve
+
+
+def _search(query: str, config: dict) -> str:
+    docs = retrieve(query, config)
+    if not docs:
+        return "검색된 근거가 없습니다. 질문을 구체화하거나 검색 조건을 확인하세요."
+    results = []
+    for i, doc in enumerate(docs, start=1):
+        metadata = doc.metadata
+        source = metadata.get("source") or metadata.get("doc_id", "출처 미상")
+        citation = f"[{i}] 출처: {source} | 청크: {metadata.get('chunk_id', '미상')}"
+        if metadata.get("page_num") not in (None, ""):
+            citation += f" | 페이지: {metadata['page_num']}"
+        results.append(f"{citation}\n{doc.page_content}")
+    return "\n\n".join(results)
+
 
 @tool
 def search_rfp(query: str) -> str:
     """RFP 문서에서 질문과 관련된 내용을 검색합니다. 요구사항, 사업 내용, 제출 서류 등 문서 본문에 대한 질문에 사용하세요."""
-    # TODO: config 로드 → retrieve(query, config) → 청크 내용과 출처(metadata)를 문자열로 합쳐서 반환
-    raise NotImplementedError
+    return _search(query, load_config())
+
+
+def make_search_rfp(config: dict):
+    """에이전트가 선택한 DB·임베딩·top_k 설정을 검색 도구에도 전달합니다."""
+
+    @tool("search_rfp")
+    def configured_search(query: str) -> str:
+        """RFP 본문에서 요구사항, 사업 내용, 예산, 기간, 제출 서류의 근거와 출처를 검색합니다."""
+        return _search(query, config)
+
+    return configured_search
