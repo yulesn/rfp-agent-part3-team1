@@ -14,6 +14,9 @@ from langchain_core.embeddings import Embeddings
 def get_embeddings(config: dict) -> Embeddings:
     emb_cfg = config["embedding"]
     if emb_cfg["provider"] == "openai":
+        batch_size = emb_cfg.get("batch_size", 128)
+        if type(batch_size) is not int or batch_size < 1:
+            raise ValueError("embedding.batch_size는 1 이상의 정수여야 합니다.")
         key = os.environ.get("OPENAI_API_KEY", "").strip()
         if not key or key == "sk-...":
             raise ValueError(
@@ -22,7 +25,7 @@ def get_embeddings(config: dict) -> Embeddings:
             )
         from langchain_openai import OpenAIEmbeddings
 
-        return OpenAIEmbeddings(model=emb_cfg["model"])
+        return OpenAIEmbeddings(model=emb_cfg["model"], chunk_size=batch_size)
 
     # TODO: huggingface 임베딩 추가 시 여기에 (langchain-huggingface 패키지는 `uv add` 로 추가)
     raise ValueError(f"지원하지 않는 embedding provider: {emb_cfg['provider']}")

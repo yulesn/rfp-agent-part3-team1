@@ -14,7 +14,7 @@ from langchain_core.documents import Document
 
 from rfp_agent.config import PROJECT_ROOT
 from rfp_agent.retrieval.embeddings import get_embeddings
-from rfp_agent.retrieval.index_io import validate_metadata
+from rfp_agent.retrieval.index_io import normalize_metadata
 
 
 def _location(config: dict) -> tuple[Path, str]:
@@ -35,22 +35,25 @@ def _embedding_metadata(config: dict) -> dict:
     }
 
 
-def _validate_chunks(chunks: list[Document]) -> list[str]:
+def _prepare_chunks(chunks: list[Document]) -> tuple[list[Document], list[str]]:
     if not chunks:
         raise ValueError("빈 청크 목록으로 인덱스를 만들 수 없습니다.")
     ids = []
+    prepared = []
     for chunk in chunks:
         if not chunk.page_content.strip():
             raise ValueError("청크 본문은 비어 있을 수 없습니다.")
-        ids.append(validate_metadata(chunk.metadata))
+        metadata = normalize_metadata(chunk.metadata)
+        ids.append(metadata["chunk_id"])
+        prepared.append(chunk.model_copy(update={"metadata": metadata}))
     if len(set(ids)) != len(ids):
         raise ValueError("chunk_id가 중복되었습니다.")
-    return ids
+    return prepared, ids
 
 
 def build_vectorstore(chunks: list[Document], config: dict) -> Chroma:
     """청크 전체를 새 컬렉션에 저장합니다. 기존 컬렉션을 덮어쓰지 않습니다."""
-    ids = _validate_chunks(chunks)
+    chunks, ids = _prepare_chunks(chunks)
     path, name = _location(config)
     if (path / "chroma.sqlite3").is_file():
         client = _client(path)
