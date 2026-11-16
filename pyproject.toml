@@ -27,6 +27,8 @@ dependencies = [
     # API 서버
     "fastapi>=0.162.2",
     "uvicorn[standard]>=0.54.0",
+    "syhwp>=0.0.8",
+    "docling>=2.150.0",
 ]
 
 [dependency-groups]
