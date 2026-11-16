@@ -79,6 +79,25 @@ def test_persistent_search_and_filters(config, chunks, monkeypatch, tmp_path):
     assert len(retrieve("학사", config, {})) == 2
 
 
+def test_upstream_metadata_survives_storage_and_retrieval(config, chunks):
+    for chunk in chunks:
+        old_id = chunk.metadata.pop("chunk_id")
+        index = int(old_id.rsplit("#", 1)[1])
+        chunk.metadata["chunk_index"] = index * 4
+        chunk.metadata["입찰 참여 마감일"] = "2026-11-30 18:01:59"
+    before = deepcopy(chunks)
+    store = vectorstore.build_vectorstore(chunks, config)
+    assert set(store.get()["ids"]) == {"a.hwp#0", "a.hwp#4", "b.pdf#0"}
+    documents = retrieve("학사", config)
+    assert {doc.metadata["chunk_id"] for doc in documents} == {"a.hwp#0", "a.hwp#4"}
+    for document in documents:
+        assert document.metadata["입찰 참여 마감일"] == "2026-11-30 18:01:59"
+        assert "발주 기관" in document.metadata
+        assert "발주기관" not in document.metadata
+        assert document.metadata["chunk_index"] in (0, 4)
+    assert chunks == before
+
+
 def test_rebuild_does_not_overwrite_or_duplicate(config, chunks):
     original = vectorstore.build_vectorstore(chunks, config)
     with pytest.raises(FileExistsError):
@@ -111,7 +130,10 @@ def test_missing_db_does_not_create_empty_index(config):
         retrieve("학사", config)
 
 
-@pytest.mark.parametrize("problem", ["empty", "duplicate", "missing_id", "nested", "nan"])
+@pytest.mark.parametrize(
+    "problem",
+    ["empty", "duplicate", "missing_id", "nested", "nan", "index_conflict", "index_duplicate", "invalid_time"],
+)
 def test_invalid_chunks_fail_before_embedding(config, chunks, problem, monkeypatch):
     if problem == "empty":
         chunks = []
@@ -121,8 +143,14 @@ def test_invalid_chunks_fail_before_embedding(config, chunks, problem, monkeypat
         del chunks[0].metadata["doc_id"]
     elif problem == "nested":
         chunks[0].metadata["bad"] = ["list"]
-    else:
+    elif problem == "nan":
         chunks[0].metadata["bad"] = float("nan")
+    elif problem == "index_conflict":
+        chunks[0].metadata["chunk_index"] = 1
+    elif problem == "index_duplicate":
+        chunks[1].metadata = {"doc_id": "a.hwp", "chunk_index": 0}
+    else:
+        chunks[0].metadata["입찰 참여 마감일"] = "2026-11-30 24:00:00"
     monkeypatch.setattr(vectorstore, "get_embeddings", lambda _: pytest.fail("API 전 검증 필요"))
     with pytest.raises(ValueError):
         vectorstore.build_vectorstore(chunks, config)
@@ -148,6 +176,34 @@ def test_openai_requires_key(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     with pytest.raises(ValueError, match="OPENAI_API_KEY"):
         get_embeddings({"embedding": {"provider": "openai", "model": "text-embedding-3-small"}})
+
+
+def test_openai_requests_respect_batch_size(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "unit-test-placeholder")
+    embeddings = get_embeddings({"embedding": {
+        "provider": "openai", "model": "text-embedding-3-small", "batch_size": 2,
+    }})
+    calls = []
+
+    class SmallBatchClient:
+        def create(self, *, input, **kwargs):
+            assert len(input) <= 2
+            calls.append(list(input))
+            return {"data": [{"embedding": [1.0, 0.0]} for _ in input]}
+
+    embeddings.client = SmallBatchClient()
+    # API나 토크나이저 다운로드 없이 요청 분할만 확인합니다.
+    embeddings.check_embedding_ctx_length = False
+    assert len(embeddings.embed_documents(["학사 시스템"] * 5)) == 5
+    assert [len(batch) for batch in calls] == [2, 2, 1]
+
+
+@pytest.mark.parametrize("size", [0, -1, True, "128"])
+def test_invalid_embedding_batch_size(size):
+    with pytest.raises(ValueError, match="batch_size"):
+        get_embeddings({"embedding": {
+            "provider": "openai", "model": "text-embedding-3-small", "batch_size": size,
+        }})
 
 
 def test_search_tool_formats_sources_and_empty_result(monkeypatch):
