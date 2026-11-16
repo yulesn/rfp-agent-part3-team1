@@ -6,7 +6,6 @@
 - 실험 아이디어: 고정 길이(RecursiveCharacterTextSplitter) vs RFP 목차(장/절) 기준 분할,
   chunk_size / overlap 비교. 설정값은 configs/*.yaml 에서 바꿉니다.
 """
-
 import re
 
 from langchain_core.documents import Document
@@ -51,8 +50,8 @@ def chunk_documents(
             if re.fullmatch(r"\|(?:\s*:?-{3,}:?\s*\|)+", normalized):
                 continue
             if normalized == "|":
-                continue
-
+                continue  
+            
             metadata = {
                 **doc.metadata,
                 "doc_id": doc.doc_id,
