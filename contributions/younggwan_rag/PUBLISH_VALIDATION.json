@@ -1,0 +1,22 @@
+{
+  "source_commit": "cd1b7ccf7f5ee09f3fc6ff4c20c4314173642eeb",
+  "uv_sync": true,
+  "unittest": "passed",
+  "cli_commands": [
+    "build",
+    "catalog",
+    "search",
+    "ask",
+    "summarize",
+    "validate"
+  ],
+  "pilot_cases": 6,
+  "live_api_calls": 0,
+  "semantic_accuracy": null,
+  "http": {
+    "loopback_http": true,
+    "documents": 2,
+    "live_enabled": false,
+    "browser_rendering_verified": false
+  }
+}

@@ -1,0 +1,256 @@
+{
+  "repository": "TheMostEvident/kor-rfp-rag-agent-openai",
+  "commit": "f99e794283926730e73a1169a92dbf49b8d5c655",
+  "files": [
+    {
+      "source": "local_rag/__init__.py",
+      "target": "src/rfp_rag/retrieval/__init__.py",
+      "source_sha256": "23e7de457174bdb5ac8d9176f23817f0d5533f2e42d0aafe27c7966f2d538ff2"
+    },
+    {
+      "source": "local_rag/chunking.py",
+      "target": "src/rfp_rag/retrieval/chunking.py",
+      "source_sha256": "9c9722857c3118982c8aa2950a1470929980425ba018510a12928c82af2fd066"
+    },
+    {
+      "source": "local_rag/evaluation.py",
+      "target": "src/rfp_rag/retrieval/evaluation.py",
+      "source_sha256": "cd3ddcaeafbc3b094b9f308c5f79d1219cfe396de6175ced3ffc511814febc03"
+    },
+    {
+      "source": "local_rag/io.py",
+      "target": "src/rfp_rag/retrieval/io.py",
+      "source_sha256": "7543b3b07af4b34ddfabdd87214849f66c2f2545f5966d03708e4190d3432b15"
+    },
+    {
+      "source": "local_rag/quality.py",
+      "target": "src/rfp_rag/retrieval/quality.py",
+      "source_sha256": "613aa009e297f0e9acadb26c53c79e64ab3fac69705a0f96243aaa610314c65e"
+    },
+    {
+      "source": "local_rag/retrieval.py",
+      "target": "src/rfp_rag/retrieval/retrieval.py",
+      "source_sha256": "7ae3fcad4ca551125a91e447d4478a6806eada764ff8ce188c04ac06eaccb240"
+    },
+    {
+      "source": "local_rag/session.py",
+      "target": "src/rfp_rag/retrieval/session.py",
+      "source_sha256": "6f1ddd974e3cb19e248737aba37a4075bd55e5aeded16caa8eabcd6eaa5d4096"
+    },
+    {
+      "source": "rfp_phase4/__init__.py",
+      "target": "src/rfp_rag/generation/__init__.py",
+      "source_sha256": "d523769148a03f0648bd8c749344eacba311aca5d982ad822b51175a8f4706cd"
+    },
+    {
+      "source": "rfp_phase4/citation_recovery.py",
+      "target": "src/rfp_rag/generation/citation_recovery.py",
+      "source_sha256": "bd6827cd5525ba902f97d6ea8daa2ae6373a73c7c2ee5fe38cea62dc774826b2"
+    },
+    {
+      "source": "rfp_phase4/comparison.py",
+      "target": "src/rfp_rag/generation/comparison.py",
+      "source_sha256": "b329de63f5c363a5ace7c437ce98aca625c3ec04cf63b09e1ebfb3c3c1c7e73e"
+    },
+    {
+      "source": "rfp_phase4/costs.py",
+      "target": "src/rfp_rag/generation/costs.py",
+      "source_sha256": "9b914ba06173b4cd0817dd561f4b46177cef18783efdf85b5e1746ea40ca7da6"
+    },
+    {
+      "source": "rfp_phase4/duration_values.py",
+      "target": "src/rfp_rag/generation/duration_values.py",
+      "source_sha256": "a0ba82464f8b28e8bb410d056d141867713fd97da067f00ec27a879993dbe581"
+    },
+    {
+      "source": "rfp_phase4/evidence.py",
+      "target": "src/rfp_rag/generation/evidence.py",
+      "source_sha256": "c43fbd3dd15f53e3e86791f2a67e999ba0ba71e759e60ada147be3c22518ca4f"
+    },
+    {
+      "source": "rfp_phase4/llm.py",
+      "target": "src/rfp_rag/generation/llm.py",
+      "source_sha256": "01fc32083cf019547f5321a741c8231707965a9df28642825eaf8e3a8d683ca3"
+    },
+    {
+      "source": "rfp_phase4/rag.py",
+      "target": "src/rfp_rag/generation/rag.py",
+      "source_sha256": "5f5052c7eeec93c432cc18a757aea754c40d4e777005ebee5b3c81d52eeb0f2f"
+    },
+    {
+      "source": "rfp_phase4/request_policy.py",
+      "target": "src/rfp_rag/generation/request_policy.py",
+      "source_sha256": "19f8b0d0aef8c57e4a573eaf708c4b8e9228f505393ed2d943b5b8c664f25e3c"
+    },
+    {
+      "source": "rfp_phase4/runtime.py",
+      "target": "src/rfp_rag/generation/runtime.py",
+      "source_sha256": "7618f6e66d4a7dccefc9bddc0d4141427410b0e2b0c5fab470ae4febf8c765d5"
+    },
+    {
+      "source": "rfp_phase5/__init__.py",
+      "target": "src/rfp_rag/summary_fields/__init__.py",
+      "source_sha256": "52c439a4b0ff2bdf409dd63734142e78a82256ece64d27af1c239f7811d56066"
+    },
+    {
+      "source": "rfp_phase5/fields.py",
+      "target": "src/rfp_rag/summary_fields/fields.py",
+      "source_sha256": "9a8d56503a22413a154ac52f9fcdf0a0796d3933f0136a96d044b9649585c300"
+    },
+    {
+      "source": "rfp_phase5_content/__init__.py",
+      "target": "src/rfp_rag/summary_content/__init__.py",
+      "source_sha256": "99427af29c90c3a11fc52aa917198a321717730d7c4d1f83a56ff608c5536bb5"
+    },
+    {
+      "source": "rfp_phase5_content/conditions.py",
+      "target": "src/rfp_rag/summary_content/conditions.py",
+      "source_sha256": "fef06f3751fe673679e19c828c1cfbadc9c8275a98e7b7f66d27c7c98b8cc09c"
+    },
+    {
+      "source": "rfp_phase5_content/context.py",
+      "target": "src/rfp_rag/summary_content/context.py",
+      "source_sha256": "71c4ab49a28bac4116a94e32a62a3baaa6c5deec063c9e6cc35a5fb913931462"
+    },
+    {
+      "source": "rfp_phase5_content/pipeline.py",
+      "target": "src/rfp_rag/summary_content/pipeline.py",
+      "source_sha256": "fcc8d42ea15ed1d5fce77dbf770a4bbad6798a3aeab5b4e41cd38f23899c2e5a"
+    },
+    {
+      "source": "rfp_phase5_content/storage.py",
+      "target": "src/rfp_rag/summary_content/storage.py",
+      "source_sha256": "ba4b23ddf7d80995a6d73d6e1dab83ebb91923165a7fb0aade48a92c628e9a79"
+    },
+    {
+      "source": "rfp_phase5_final/__init__.py",
+      "target": "src/rfp_rag/summary_full/__init__.py",
+      "source_sha256": "b255bbb3949f5a0c430cac977c91a2373e0a980c92c8b82aeff45a28bbdaadfa"
+    },
+    {
+      "source": "rfp_phase5_final/catalog_audit.py",
+      "target": "src/rfp_rag/summary_full/catalog_audit.py",
+      "source_sha256": "788c7365ab6f30228ac5a412fa88a0c4cb85e767e43e9b7503f9a6c5788f59f6"
+    },
+    {
+      "source": "rfp_phase5_final/engine.py",
+      "target": "src/rfp_rag/summary_full/engine.py",
+      "source_sha256": "e57eecfcdd5d16fb85e0d9eb792613e5fda7fc033db20e004c4ed01326f74db4"
+    },
+    {
+      "source": "rfp_phase5_final/legacy.py",
+      "target": "src/rfp_rag/summary_full/legacy.py",
+      "source_sha256": "9e42e70012919333d6eeb966a935f73e69d8a3454d668244393100bc156ed383"
+    },
+    {
+      "source": "rfp_phase5_final/review.py",
+      "target": "src/rfp_rag/summary_full/review.py",
+      "source_sha256": "e2a4bb7a3fee1757da8baaf69accf5069290b9bc637af6ce0f9ae2043fd2d1db"
+    },
+    {
+      "source": "rfp_phase5_final/transport.py",
+      "target": "src/rfp_rag/summary_full/transport.py",
+      "source_sha256": "e70ba50f1e250c221d995a9650b2c85ad5042aab1fff28fc39e7fdb3912498c3"
+    },
+    {
+      "source": "rfp_phase5_recovery/__init__.py",
+      "target": "src/rfp_rag/recovery/__init__.py",
+      "source_sha256": "8391504565094a906b24934d7fe8e4686403a420b17f25f5a979bb76e8ff4cbf"
+    },
+    {
+      "source": "rfp_phase5_recovery/client.py",
+      "target": "src/rfp_rag/recovery/client.py",
+      "source_sha256": "b5e84582468fe2ea900c301a099cefbe8b393be716d3f63beb2eecbd3be11bdf"
+    },
+    {
+      "source": "rfp_phase5_recovery/runner.py",
+      "target": "src/rfp_rag/recovery/runner.py",
+      "source_sha256": "65d1c713669d14f50e516397445d07d1338f77d0c3310b48899aabcab4ce1297"
+    },
+    {
+      "source": "rfp_phase6/__init__.py",
+      "target": "src/rfp_rag/conversation/__init__.py",
+      "source_sha256": "8328e0e34d6a3eeb73b0b7f146857b4863e9de053623c87e0f93da32e32eb362"
+    },
+    {
+      "source": "rfp_phase6/focus.py",
+      "target": "src/rfp_rag/conversation/focus.py",
+      "source_sha256": "4176ae786cebfc1273235f7d5cd4491e30e87b71c5c4b3112a4f609e1ea6f972"
+    },
+    {
+      "source": "rfp_phase6/literal_quotes.py",
+      "target": "src/rfp_rag/conversation/literal_quotes.py",
+      "source_sha256": "bf062058b5a525d42c714bd93b5a21f870f3899079cdacca409f09d352fde809"
+    },
+    {
+      "source": "rfp_phase6/query.py",
+      "target": "src/rfp_rag/conversation/query.py",
+      "source_sha256": "55df43633010c2cc5555fda60e2fa5181597e3c7cbd9d719175c99145dbd1a87"
+    },
+    {
+      "source": "rfp_phase6/resolution.py",
+      "target": "src/rfp_rag/conversation/resolution.py",
+      "source_sha256": "3ac851558b8d4787931ba50b61be21fd532d9db0fc35a2bc26d7f643b5b4eafb"
+    },
+    {
+      "source": "rfp_phase6/runtime.py",
+      "target": "src/rfp_rag/conversation/runtime.py",
+      "source_sha256": "e4787eda0b21683e83a868649a344d4b4e16e370814947a317cf5131c0e56a2c"
+    },
+    {
+      "source": "rfp_phase6/session.py",
+      "target": "src/rfp_rag/conversation/session.py",
+      "source_sha256": "fe5e2ca852c7d5aac6e1bb97c7ab4a769d84983d7b7f42f6ae03cd5f1214f0af"
+    },
+    {
+      "source": "rfp_phase7/__init__.py",
+      "target": "src/rfp_rag/evaluation/__init__.py",
+      "source_sha256": "ae3778b4ee90f97f6274c23d262c81c32cd646631e56eacbd508d1b07859e063"
+    },
+    {
+      "source": "rfp_phase7/evaluate.py",
+      "target": "src/rfp_rag/evaluation/evaluate.py",
+      "source_sha256": "528373250811f70ce3360d208ac74e7ab42eded95b90bf8fd2280d560cb1352b"
+    },
+    {
+      "source": "rfp_phase7/evidence.py",
+      "target": "src/rfp_rag/evaluation/evidence.py",
+      "source_sha256": "99b1933ae8b23071db370893372d900a9e80060f6bf51fd33a9ef98c355f2a30"
+    },
+    {
+      "source": "rfp_phase7/review.py",
+      "target": "src/rfp_rag/evaluation/review.py",
+      "source_sha256": "9abd02a335f22d75acab5ed06c8ae1f792288831cc81be3d7c39be348ae11139"
+    },
+    {
+      "source": "rfp_phase8/__init__.py",
+      "target": "src/rfp_rag/pilot/__init__.py",
+      "source_sha256": "e91071c9ea45b6ff2975bd80e195ca49d9a9ebf0c6680040506b3eaf4b0e83eb"
+    },
+    {
+      "source": "rfp_phase8/claim_audit.py",
+      "target": "src/rfp_rag/pilot/claim_audit.py",
+      "source_sha256": "10eea6989eefbc502d94392accee28dfe52b283bb86d73a36770ca0e83fc7932"
+    },
+    {
+      "source": "rfp_phase8/pilot.py",
+      "target": "src/rfp_rag/pilot/pilot.py",
+      "source_sha256": "6de372a5057fa4eda297eea3faac8c53a62f768c83efd9e9c7cb3d1be7b7421d"
+    },
+    {
+      "source": "rfp_phase8/validation.py",
+      "target": "src/rfp_rag/pilot/validation.py",
+      "source_sha256": "cd91ddb96c0a9e3e3af297db17113a93620fc98f4c7bdc50e68939004e1064f5"
+    },
+    {
+      "source": "rfp_phase8/web.py",
+      "target": "src/rfp_rag/pilot/web.py",
+      "source_sha256": "58bab9245ccc0266a9dd3f4e36c2086e1f6ca80e335647bb34e4e752a439270c"
+    },
+    {
+      "source": "rfp_phase7/diagnostics.py",
+      "target": "src/rfp_rag/evaluation/diagnostics.py",
+      "source_sha256": "027b883a980740aded640f86cc8dece3574c7e3b4cc32fb0c94815aa01606350"
+    }
+  ]
+}

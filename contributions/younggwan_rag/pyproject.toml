@@ -1,0 +1,33 @@
+[project]
+name = "rfp-grounded-rag"
+version = "0.1.0"
+description = "유영관 RFP RAG 구현: 로컬 검색, 근거 답변, 대화, 전체 요약, 검증"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "numpy>=1.26,<3",
+    "scipy>=1.12,<2",
+    "scikit-learn>=1.4,<2",
+    "pyyaml>=6,<7",
+]
+
+[project.optional-dependencies]
+openai = ["openai>=1.68,<3", "python-dotenv>=1,<2"]
+notebook = ["ipykernel>=6.29", "nbformat>=5.10", "nbclient>=0.10"]
+team = ["langchain-core>=0.3"]
+
+[project.scripts]
+rfp-rag = "rfp_rag.cli:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+rfp_rag = ["*.json", "*.jsonl", "pilot/*.html"]
+
+[tool.uv]
+package = true

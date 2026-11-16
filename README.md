@@ -99,3 +99,10 @@ uv run python scripts/evaluate.py         # 평가
 - 숫자·모델명은 코드에 쓰지 말고 `configs/*.yaml` 에서 불러오기
 - LLM 은 `get_llm(config)`, 임베딩은 `get_embeddings(config)` 로만 생성
 - `.env`, `data/` 는 커밋하지 않기
+
+## 유영관 RAG 구현 및 웹 파일럿
+
+선정한 네 노트북, 공통 Python 구현, 설치·실행 및 Phase 1–8 개발 내역은
+[contributions/younggwan_rag/README.md](contributions/younggwan_rag/README.md)를 참고하세요.
+해당 폴더에서 독립 실행하며 로컬 웹 주소는 `http://127.0.0.1:8765/`입니다.
+실제 문서와 키는 별도로 준비합니다. 팀 LangGraph/API 연결은 후속 통합 작업입니다.
