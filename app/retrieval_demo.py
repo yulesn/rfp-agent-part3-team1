@@ -38,7 +38,12 @@ if not key_ready:
 
 with st.form("retrieval_question"):
     question = st.text_input(
-        "질문", placeholder="한빛시청 도서관 통합 시스템의 사업 예산과 기간은?"
+        "질문",
+        placeholder=(
+            "한빛시청 도서관 통합 시스템의 사업 예산과 기간은?"
+            if Path(args.config).name == "retrieval_demo.yaml"
+            else "찾을 사업명과 궁금한 내용을 입력하세요."
+        ),
     )
     submitted = st.form_submit_button(
         "검색", disabled=not (db_exists and key_ready), type="primary"
