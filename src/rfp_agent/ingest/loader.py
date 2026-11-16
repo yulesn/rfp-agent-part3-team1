@@ -10,7 +10,6 @@
 
 import json
 import logging
-import re
 from pathlib import Path
 
 from rfp_agent.ingest.schema import ParsedDocument
@@ -22,15 +21,15 @@ from rfp_agent.ingest.metadata import load_metadata
 logger = logging.getLogger(__name__)
 
 
+
 def clean_unicode(value):
     """UTF-8 저장이 불가능한 단독 서로게이트 문자를 정리한다."""
 
     if isinstance(value, str):
-        pattern = (
-            r"[\ud800-\udbff](?![\udc00-\udfff])"
-            r"|(?<![\ud800-\udbff])[\udc00-\udfff]"
-        )
-        return re.sub(pattern, "\uFFFD", value)
+        return value.encode(
+            "utf-8",
+            errors="replace"
+        ).decode("utf-8")
 
     if isinstance(value, dict):
         return {
@@ -207,3 +206,6 @@ def read_documents(
     logger.info("문서 로드 완료: %d건 (%s)", len(documents), path)
 
     return documents
+
+
+
