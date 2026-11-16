@@ -11,10 +11,8 @@ from rfp_agent.config import load_config
 from rfp_agent.retrieval.retriever import retrieve
 
 
-@tool
-def search_rfp(query: str) -> str:
-    """RFP 문서에서 질문과 관련된 내용을 검색합니다. 요구사항, 사업 내용, 제출 서류 등 문서 본문에 대한 질문에 사용하세요."""
-    docs = retrieve(query, load_config())
+def _search(query: str, config: dict) -> str:
+    docs = retrieve(query, config)
     if not docs:
         return "검색된 근거가 없습니다. 질문을 구체화하거나 검색 조건을 확인하세요."
     results = []
@@ -26,3 +24,20 @@ def search_rfp(query: str) -> str:
             citation += f" | 페이지: {metadata['page_num']}"
         results.append(f"{citation}\n{doc.page_content}")
     return "\n\n".join(results)
+
+
+@tool
+def search_rfp(query: str) -> str:
+    """RFP 문서에서 질문과 관련된 내용을 검색합니다. 요구사항, 사업 내용, 제출 서류 등 문서 본문에 대한 질문에 사용하세요."""
+    return _search(query, load_config())
+
+
+def make_search_rfp(config: dict):
+    """에이전트가 선택한 DB·임베딩·top_k 설정을 검색 도구에도 전달합니다."""
+
+    @tool("search_rfp")
+    def configured_search(query: str) -> str:
+        """RFP 본문에서 요구사항, 사업 내용, 예산, 기간, 제출 서류의 근거와 출처를 검색합니다."""
+        return _search(query, config)
+
+    return configured_search
