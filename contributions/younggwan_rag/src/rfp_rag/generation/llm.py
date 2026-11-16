@@ -253,6 +253,8 @@ class LLMConfig:
             raise ValueError("max_request_bytes cannot exceed max_total_input_bytes")
         if self.reasoning_effort not in {"none", "low", "medium", "high", "xhigh"}:
             raise ValueError("Unsupported explicit reasoning_effort")
+        if self.model == "gpt-6.1-sol" and self.reasoning_effort == "none":
+            raise ValueError("gpt-6.1-sol requires reasoning_effort low or higher; none is unsupported")
 
 
 def _json(value):

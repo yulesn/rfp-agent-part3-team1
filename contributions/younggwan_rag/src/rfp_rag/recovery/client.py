@@ -97,11 +97,12 @@ class RecoveryLLM(ShortCitationLLM):
             detail['diagnostic_write_failed']=True
         error.recovery_diagnostic=detail
 
-    def _response_payload(self,response):
+    def _response_payload(self,response,*,normalize_incomplete=False,with_adjustment=False):
         value=_field(response,'output_text')
         self._received_output=value if isinstance(value,str) else None
         try:
-            return OpenAIGroundedLLM._response_payload(response)
+            return OpenAIGroundedLLM._response_payload(response,
+                normalize_incomplete=normalize_incomplete,with_adjustment=with_adjustment)
         except LLMError as error:
             message=error.args[0] if error.args and isinstance(error.args[0],str) else ''
             self._save_diagnostic(error,'response_structure',STRUCTURE_REASONS.get(message,'unclassified_validation_error'))

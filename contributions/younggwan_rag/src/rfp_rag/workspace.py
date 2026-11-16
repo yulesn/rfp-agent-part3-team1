@@ -1,4 +1,4 @@
-"""Build and open a portable local corpus; never call an embedding or chat API."""
+"""Portable corpora with separate, explicitly authorized semantic indexing."""
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
@@ -14,6 +14,8 @@ from .retrieval.chunking import build_chunks
 from .retrieval.io import load_chunks, load_documents, sha256_file, verify_saved_run, write_json, write_jsonl
 from .retrieval.quality import validate_chunks
 from .retrieval.retrieval import LocalSearchIndex
+from .retrieval.semantic import (DEFAULT_SEMANTIC_CONFIG, SemanticSearchIndex,
+                                 build_semantic_index, normalize_semantic_config)
 
 
 def package_hashes():
@@ -23,7 +25,7 @@ def package_hashes():
 
 
 def settings_from_file(path=None):
-    """Merge user YAML over the existing baseline, without choosing a new model."""
+    """No config preserves A; YAML selects an explicit, source-bound profile."""
     defaults = json.loads(resources.files('rfp_rag').joinpath('defaults.json').read_text(encoding='utf-8'))
     settings = {
         'chunking': defaults['default']['chunking'],
@@ -32,18 +34,22 @@ def settings_from_file(path=None):
         'generation': {**defaults['phase5']['generation'], **defaults['phase8']['generation']},
         'conversation': defaults['phase6']['conversation'],
         'summary': defaults['phase5']['summary'],
+        'semantic': dict(DEFAULT_SEMANTIC_CONFIG),
     }
     if path is not None:
         import yaml
         supplied = yaml.safe_load(Path(path).read_text(encoding='utf-8'))
         if not isinstance(supplied, dict) or set(supplied) - set(settings):
-            raise ValueError('설정은 chunking/index/retrieval/generation/conversation/summary로 구성하세요.')
+            raise ValueError('설정은 chunking/index/retrieval/generation/conversation/summary/semantic으로 구성하세요.')
         for key, values in supplied.items():
             if not isinstance(values, dict) or set(values) - set(settings[key]):
                 raise ValueError(f'지원하지 않는 설정: {key}')
             settings[key].update(values)
     if settings['generation'].get('enabled') is not False:
         raise ValueError('설정의 enabled는 false로 유지하고 실행 시 --live를 지정하세요.')
+    settings['semantic'] = normalize_semantic_config(settings['semantic'])
+    from .generation.llm import LLMConfig
+    LLMConfig(**settings['generation'])
     return settings
 
 
@@ -65,7 +71,7 @@ def build_workspace(source, destination, *, config=None):
     destination = Path(destination).expanduser().resolve()
     settings = settings_from_file(config)
     if destination.exists():
-        with open_workspace(destination) as env:
+        with open_workspace(destination, lexical_only=True) as env:
             saved = env['source_manifest']
             if saved['input_sha256'] != sha256_file(source) or saved['settings'] != settings:
                 raise ValueError('원문 또는 설정이 바뀌었습니다. 새 workspace 경로를 지정하세요.')
@@ -111,13 +117,14 @@ class Workspace(dict, AbstractContextManager):
         self['index'].close()
 
 
-def open_workspace(root):
+def open_workspace(root, *, allow_query_api=False, embedding_client=None, lexical_only=False):
     """Verify exact data, index and package bindings before exposing any evidence."""
     root = Path(root).expanduser().resolve()
     manifest = verify_saved_run(root)
     if manifest.get('version') != 'rfp-team-workspace-v1':
         raise ValueError('이 패키지로 생성한 workspace가 아닙니다. 원문 JSONL로 새로 구축하세요.')
-    if manifest.get('package_code_sha256') != package_hashes():
+    from .workspace_compat import compatible_package
+    if not compatible_package(manifest.get('package_code_sha256'), package_hashes()):
         raise ValueError('구현 코드가 바뀌었습니다. 새 workspace를 구축하세요.')
     environment = environment_report(root)
     if not environment['compatible']:
@@ -128,6 +135,10 @@ def open_workspace(root):
     try:
         if index.get_metadata()['chunk_count'] != len(chunks):
             raise ValueError('저장 청크와 인덱스 개수가 다릅니다.')
+        semantic = manifest['settings'].get('semantic', {})
+        if semantic.get('enabled') and not lexical_only:
+            index = SemanticSearchIndex(index, root, chunks, semantic,
+                                        allow_query_api=allow_query_api, client=embedding_client)
         return Workspace(root=root, documents=documents, chunks=chunks, registry=registry,
                          index=index, environment=environment, source_manifest=manifest,
                          config=json.loads((root / 'configs/phase4.json').read_text(encoding='utf-8')),
@@ -135,6 +146,30 @@ def open_workspace(root):
     except BaseException:
         index.close()
         raise
+
+
+def embed_workspace(root, *, live=False, env_file=None, client=None, progress=None):
+    """Embed only the corpus explicitly selected by this workspace; no chat call.
+
+    The lexical/source manifest stays immutable. Semantic artifacts have their
+    own source/model/vector bindings and are reused on an identical rerun.
+    """
+    if type(live) is not bool:
+        raise TypeError('live는 True/False여야 합니다.')
+    if live and client is None:
+        from .workflows import require_api_key
+        require_api_key(env_file)
+    with open_workspace(root, lexical_only=True) as env:
+        config = env['source_manifest']['settings'].get('semantic', {})
+        if not config.get('enabled'):
+            raise ValueError('A 설정은 의미 검색이 꺼져 있습니다. D workspace를 지정하세요.')
+        meta = build_semantic_index(env['root'], env['chunks'], env['index'], config,
+                                    live=live, client=client, progress=progress)
+        return {'workspace': str(env['root']), 'model': config['model'],
+                'dimensions': config['dimensions'], 'chunks': meta['chunk_count'],
+                'semantic_index_fingerprint': meta['fingerprint'], 'reused': meta['reused'],
+                'api_calls_this_run': meta['api_calls_this_run'], 'usage': meta['usage'],
+                'semantic_accuracy': None, 'independent_quality_verified': False}
 
 
 def build_demo_workspace(destination, *, config=None):

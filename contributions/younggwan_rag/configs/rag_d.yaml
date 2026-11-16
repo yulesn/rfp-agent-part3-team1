@@ -1,0 +1,21 @@
+# D: GPT-6.1 Sol + 기존 BM25/문자 TF-IDF/RRF + OpenAI 의미 검색.
+# build는 로컬 실행. 문서 임베딩은 embed --live로 따로 구축합니다.
+generation:
+  enabled: false
+  model: gpt-6.1-sol
+  reasoning_effort: low
+  max_calls: 8
+  max_total_input_bytes: 600000
+retrieval:
+  method: rrf
+  top_k: 8
+semantic:
+  enabled: true
+  model: text-embedding-3-large
+  dimensions: 3072
+  batch_size: 32
+  max_build_calls: 1000
+  max_build_input_bytes: 100000000
+  max_query_calls: 64
+  max_query_input_bytes: 256000
+  weight: 1.0

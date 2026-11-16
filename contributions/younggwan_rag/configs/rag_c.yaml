@@ -1,0 +1,21 @@
+# C: A의 생성 모델·추론 설정을 유지하고 기존 검색에 OpenAI 의미 검색을 추가합니다.
+# build는 로컬 실행. 문서 임베딩은 embed --live로 따로 구축합니다.
+generation:
+  enabled: false
+  model: gpt-5.4-mini
+  reasoning_effort: none
+  max_calls: 8
+  max_total_input_bytes: 600000
+retrieval:
+  method: rrf
+  top_k: 8
+semantic:
+  enabled: true
+  model: text-embedding-3-large
+  dimensions: 3072
+  batch_size: 32
+  max_build_calls: 1000
+  max_build_input_bytes: 100000000
+  max_query_calls: 64
+  max_query_input_bytes: 256000
+  weight: 1.0

@@ -1,0 +1,9 @@
+# 기존 Phase 8 기준선. Task 2의 모델/검색 성능 개선은 적용하지 않았습니다.
+generation:
+  enabled: false
+  model: gpt-5.4-mini
+  max_calls: 8
+  max_total_input_bytes: 600000
+retrieval:
+  method: rrf
+  top_k: 8

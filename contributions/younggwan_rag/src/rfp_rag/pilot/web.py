@@ -7,13 +7,15 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from rfp_rag.recovery.runner import load_api_key
-from .pilot import readiness, review_template, save_review, session_report
+from .pilot import embedding_usage, readiness, review_template, save_review, session_report
+from .summaries import SummaryInputError, WebSummaries
 
 
-def create_server(pilot, *, port=8765):
+def create_server(pilot, *, port=8765, summary_client=None):
     """Use HTTPServer on the index's owning thread, never ThreadingHTTPServer."""
     page = (Path(__file__).parent / 'pilot.html').read_bytes()
     local_readiness = readiness(pilot.env)
+    summaries = WebSummaries(pilot.root, client=summary_client)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -52,14 +54,23 @@ def create_server(pilot, *, port=8765):
                         'filters': pilot.chat.filters, 'approved_doc_ids': pilot.approved_doc_ids,
                         'live_enabled': pilot.chat.llm.config.enabled, 'halted': pilot.halted,
                         'usage': pilot.chat.llm.usage_report(), 'model': pilot.chat.llm.config.model,
+                        'semantic_model': pilot.env['index'].get_metadata().get('semantic_embedding_model'),
+                        'embedding_usage': embedding_usage(pilot.env),
+                        'summary_job': summaries.current(),
                         'turns': [{'turn_id': r['turn_id'], 'question': r['question'],
                                    'status': r['result']['status']} for r in pilot.records]}
                 elif parsed.path == '/api/record':
                     value = self.find_record(parse_qs(parsed.query).get('turn_id', [''])[0])
                 elif parsed.path == '/api/summary':
-                    value = pilot.saved_summary(parse_qs(parsed.query).get('doc_id', [''])[0])
+                    did = parse_qs(parsed.query).get('doc_id', [''])[0]
+                    value = summaries.saved(pilot.env, did)
+                    if value['status'] == 'unavailable':
+                        value = pilot.saved_summary(did)
+                elif parsed.path == '/api/summary/status':
+                    value = summaries.status(parse_qs(parsed.query).get('job_id', [''])[0])
                 elif parsed.path == '/api/report':
                     value = session_report(pilot.folder)
+                    value['web_summary'] = summaries.report()
                 else:
                     self.send_value(404, {'error': '없는 경로입니다.'})
                     return
@@ -81,6 +92,10 @@ def create_server(pilot, *, port=8765):
                 if not isinstance(body, dict):
                     raise ValueError('요청은 JSON 객체여야 합니다.')
                 path = urlsplit(self.path).path
+                if summaries.running() and path in {
+                        '/api/select', '/api/generation', '/api/ask', '/api/reset',
+                        '/api/resume', '/api/summary/plan'}:
+                    raise SummaryInputError('요약 생성이 진행 중입니다. 완료 후 다른 요청을 실행하세요.')
                 if path == '/api/select':
                     value = {'selected': pilot.select(body.get('doc_ids', []), filters=body.get('filters', {}))}
                 elif path == '/api/generation':
@@ -96,6 +111,18 @@ def create_server(pilot, *, port=8765):
                     value = {'live_enabled': enabled, 'approved_doc_ids': pilot.approved_doc_ids}
                 elif path == '/api/ask':
                     value = pilot.submit(body.get('question'), request_id=body.get('request_id'))
+                elif path in {'/api/summary/plan', '/api/summary/generate'}:
+                    did = pilot.env['registry'].resolve_doc_ids([body.get('doc_id')])[0]
+                    if pilot.chat.active_doc_ids != [did]:
+                        raise SummaryInputError('요약할 문서 하나만 선택하고 선택 적용을 누르세요.')
+                    if path == '/api/summary/plan':
+                        value = summaries.prepare(pilot.env, did)
+                    else:
+                        if (not pilot.chat.llm.config.enabled
+                                or did not in pilot.approved_doc_ids or pilot.halted):
+                            raise SummaryInputError('선택 문서의 실제 API 설정을 적용한 뒤 요약을 생성하세요.')
+                        value = summaries.start(pilot.env, did, plan_id=body.get('plan_id'),
+                                                allow_api=body.get('allow_api', False))
                 elif path == '/api/reset':
                     pilot.reset_conversation()
                     value = {'reset': True, 'usage': pilot.chat.llm.usage_report()}
@@ -112,6 +139,8 @@ def create_server(pilot, *, port=8765):
                     self.send_value(404, {'error': '없는 경로입니다.'})
                     return
                 self.send_value(200, value)
+            except SummaryInputError as error:
+                self.send_value(400, {'error': str(error)})
             except (ValueError, TypeError, KeyError, StopIteration):
                 self.send_value(400, {'error': '입력·문서 범위·실행 상태를 확인하세요. 실패 후에는 오류 확인 후 계속을 누르세요.'})
             except Exception:

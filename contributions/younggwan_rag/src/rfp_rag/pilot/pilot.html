@@ -18,13 +18,19 @@ small,.muted{font-size:13px;color:#55717a}.badge{display:inline-block;background
 <label for="documents">문서 목록 <small>여러 문서 선택 가능</small></label><select id="documents" multiple></select>
 <label for="agency">기관 필터</label><input id="agency" placeholder="정확한 기관명, 비우면 해제">
 <label for="year">연도 필터</label><input id="year" type="number" placeholder="예: 2024">
-<button id="select">선택 적용</button><p id="scope" class="muted"></p>
+<button id="select">선택 적용</button><p id="scope" class="muted"></p><p id="semantic-mode" class="muted"></p>
 <details><summary>답변 생성 설정</summary><p class="muted">기본은 원문 검색입니다. 아래 설정을 적용한 후 질문을 제출하면 선택 문서의 근거를 API에 전송합니다.</p>
-<label class="row"><input id="live" type="checkbox">실제 API 답변 생성</label>
+<label class="row"><input id="live" type="checkbox">실제 API 답변·요약 생성</label>
 <button id="generation" class="secondary">선택 문서 API 설정 적용</button><p id="mode" class="muted"></p></details>
-<details><summary>저장된 전체 요약</summary><p class="muted">문서 하나를 선택한 뒤 엽니다. 기존 요약만 읽으며, 없는 요약을 새로 생성하지 않습니다.</p><button id="summary" class="secondary">저장 요약 열기</button></details>
 <details><summary>대화와 실행 기록</summary><button id="reset" class="secondary">대화 초기화</button><button id="resume" class="secondary">오류 확인 후 계속</button><p class="muted">초기화해도 세션 호출 한도와 기록은 유지됩니다.</p><div id="turns"></div></details>
 </aside><div>
+<section aria-labelledby="summary-title"><h2 id="summary-title">선택 문서 전체 요약</h2>
+<p class="muted">문서 하나를 선택하고 ‘선택 적용’을 누르세요. 전체 원문을 나누어 읽고 사업 개요·예산·기간·자격·제출 조건·평가 기준을 정리합니다.</p>
+<p id="summary-plan" class="muted">문서를 선택하면 예상 호출 수를 확인할 수 있습니다. 선택만으로는 API를 호출하지 않습니다.</p>
+<button id="generate-summary" disabled>전체 요약 생성</button><button id="summary" class="secondary">저장 요약 열기</button>
+<p id="summary-permission" class="muted">생성하려면 왼쪽에서 실제 API 답변·요약 생성을 켜고 선택 문서 API 설정을 적용하세요.</p>
+<progress id="summary-progress" hidden value="0" max="1" style="width:100%" aria-label="요약 생성 진행률"></progress>
+<p id="summary-job-status" role="status"></p><div id="summary-content"></div></section>
 <section><h2>질문하기</h2><p id="overview" class="muted"></p><label for="question">선택 문서에 대한 질문</label><textarea id="question" rows="3" maxlength="2000" placeholder="사업 예산과 과업기간을 조건과 함께 알려줘."></textarea><button id="ask">질문 제출</button><p id="status" role="status"></p></section>
 <section><h2>답변과 근거</h2><div id="answer"><p class="muted">문서를 선택하고 질문을 제출하세요.</p></div><div id="evidence"></div></section>
 <section id="feedback"><h2>이 답변 검토</h2><p class="muted">원문을 대조한 뒤 기록하세요. 인용 검사 통과만으로 정답 처리하지 않습니다.</p>
@@ -34,27 +40,110 @@ small,.muted{font-size:13px;color:#55717a}.badge{display:inline-block;background
 <script>
 'use strict';
 const $=id=>document.getElementById(id);
-let state=null,currentRecord=null,busy=false;
+let state=null,currentRecord=null,busy=false,summaryPlan=null,summaryJob=null,summaryTimer=null;
 const labels={answer_correct:'질문에 대한 답이 정확함',claims_supported:'주장이 인용 원문으로 뒷받침됨',conditions_preserved:'단위·VAT·기산점·예외 조건이 보존됨',required_facts_complete:'요청한 핵심 항목이 빠짐없이 처리됨',abstention_or_clarification_appropriate:'답변·보류·확인 질문의 선택이 적절함'};
 const selected=()=>Array.from($('documents').selectedOptions,o=>o.value);
 const text=(tag,value,cls)=>{let node=document.createElement(tag);node.textContent=value;if(cls)node.className=cls;return node;};
 async function api(path,body){let response=await fetch(path,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});let value=await response.json();if(!response.ok)throw Error(value.error||'요청 실패');return value;}
-async function action(fn){if(busy)return;busy=true;document.querySelectorAll('button').forEach(b=>b.disabled=true);$('status').className='muted';$('status').textContent='처리 중입니다…';try{await fn();await refresh();$('status').textContent='완료했습니다.';}catch(e){$('status').className='error';$('status').textContent=e.message;}finally{busy=false;document.querySelectorAll('button').forEach(b=>b.disabled=false);}}
+async function action(fn){if(busy)return;busy=true;controls();$('status').className='muted';$('status').textContent='처리 중입니다…';try{await fn();await refresh();$('status').textContent='완료했습니다.';}catch(e){$('status').className='error';$('status').textContent=e.message;}finally{busy=false;controls();}}
 function documents(preserve=false){let keep=new Set(preserve?selected():state.active_doc_ids);let needle=$('keyword').value.trim().toLowerCase();$('documents').replaceChildren();for(const doc of state.documents){let label=`${doc.agency||'기관 미상'} · ${doc.project_title||doc.file_name} (${doc.document_year||'연도 미상'})`;if(needle&&!`${label} ${doc.doc_id}`.toLowerCase().includes(needle)&&!keep.has(doc.doc_id))continue;let option=text('option',label);option.value=doc.doc_id;option.selected=keep.has(doc.doc_id);$('documents').append(option);}}
-async function refresh(){state=await api('/api/state');documents();$('agency').value=state.filters.agency||'';$('year').value=state.filters.document_year||'';$('scope').textContent=`현재 대화 범위: ${state.active_doc_ids.length}개 문서`;$('mode').textContent=`${state.live_enabled?'API 생성 켜짐':'원문 검색 모드'} · 허용 문서 ${state.approved_doc_ids.length}개 · ${state.model}`;$('live').checked=state.live_enabled;$('overview').textContent=`대표 문서 ${state.readiness.canonical_documents}건 · 원본 ID ${state.readiness.original_document_ids}개 · ${state.halted?'오류 확인 후 계속을 눌러 주세요.':'문서별 원문 근거를 사용합니다.'}`;let u=state.usage;$('usage').textContent=`실제 호출 ${u.live_api_calls}/${u.max_calls} · 캐시 ${u.cache_hits} · 실패 ${u.failed_attempts} · 입력 ${u.reported_input_tokens} / 출력 ${u.reported_output_tokens} 토큰 · 단가 미설정 시 달러 추정 없음`;$('turns').replaceChildren();for(const turn of state.turns){let b=text('button',`${turn.question} · ${turn.status}`,'secondary');b.onclick=()=>action(async()=>renderRecord(await api('/api/record?turn_id='+encodeURIComponent(turn.turn_id))));$('turns').append(b);}}
+async function refresh(){state=await api('/api/state');documents();$('agency').value=state.filters.agency||'';$('year').value=state.filters.document_year||'';$('scope').textContent=`현재 대화 범위: ${state.active_doc_ids.length}개 문서`;$('mode').textContent=`${state.live_enabled?'API 생성 켜짐':'원문 검색 모드'} · 허용 문서 ${state.approved_doc_ids.length}개 · ${state.model}`;$('live').checked=state.live_enabled;$('overview').textContent=`대표 문서 ${state.readiness.canonical_documents}건 · 원본 ID ${state.readiness.original_document_ids}개 · ${state.halted?'오류 확인 후 계속을 눌러 주세요.':'문서별 원문 근거를 사용합니다.'}`;$('semantic-mode').textContent=state.semantic_model?`의미 검색: ${state.semantic_model} · 질문 임베딩 호출 ${state.embedding_usage?.api_calls||0} · 캐시 ${state.embedding_usage?.cache_hits||0}`:'검색: BM25 + 문자 TF-IDF';let u=state.usage;$('usage').textContent=`실제 호출 ${u.live_api_calls}/${u.max_calls} · 캐시 ${u.cache_hits} · 실패 ${u.failed_attempts} · 입력 ${u.reported_input_tokens} / 출력 ${u.reported_output_tokens} 토큰 · 단가 미설정 시 달러 추정 없음`;$('turns').replaceChildren();for(const turn of state.turns){let b=text('button',`${turn.question} · ${turn.status}`,'secondary');b.onclick=()=>action(async()=>renderRecord(await api('/api/record?turn_id='+encodeURIComponent(turn.turn_id))));$('turns').append(b);}summaryJob=state.summary_job;controls();}
+function summaryRunning(){return ['queued','running'].includes(summaryJob?.status);}
+function controls(){
+  document.querySelectorAll('button').forEach(button=>button.disabled=busy);
+  if(summaryRunning())for(const id of ['select','generation','ask','reset','resume'])$(id).disabled=true;
+  const ids=selected();
+  const ready=ids.length===1&&summaryPlan?.doc_id===ids[0]&&summaryPlan.can_start;
+  const approved=state?.live_enabled&&state.approved_doc_ids.includes(ids[0])&&!state.halted;
+  $('generate-summary').disabled=busy||summaryRunning()||!ready||!approved;
+  $('summary-permission').hidden=Boolean(approved&&ready);
+}
+async function prepareSummary(){
+  summaryPlan=null;
+  if(!summaryRunning()&&state.active_doc_ids[0]!==summaryJob?.doc_id){
+    $('summary-progress').hidden=true;$('summary-job-status').replaceChildren();
+  }
+  if(state.active_doc_ids.length!==1){
+    $('summary-plan').textContent='요약할 문서 하나만 선택하고 선택 적용을 누르세요.';
+    $('summary-content').replaceChildren();controls();return;
+  }
+  if(summaryRunning())return;
+  const did=state.active_doc_ids[0];
+  const plan=await api('/api/summary/plan',{doc_id:did});
+  summaryPlan=plan;
+  $('summary-plan').textContent=`${plan.file_name} · ${plan.model} · 전체 ${plan.chunk_count}개 청크 / ${plan.batch_count}개 배치 · 새 API 호출 예상 ${plan.new_api_calls}회. 이 문서 요약 한도 ${plan.budget.max_total_calls}회 중 ${plan.budget.calls_used_or_reserved}회 사용·예약. 질문 호출 한도와 별도입니다.`;
+  if(!plan.can_start)$('summary-plan').textContent+=' 호출 한도 또는 이전 실패로 생성을 중단했습니다. 저장 결과와 실행 기록을 확인하세요. 자동 재시도하지 않습니다.';
+  const saved=await api('/api/summary?doc_id='+encodeURIComponent(did));
+  if(saved.status==='saved_summary')showSummary(saved.result);
+  else $('summary-content').replaceChildren(text('p','저장된 요약이 없습니다. API 설정을 적용한 뒤 전체 요약 생성을 누르세요.','muted'));
+  controls();
+}
+function showSummary(result){
+  const box=$('summary-content');box.replaceChildren();
+  const states={evidence_found:'근거 확인',notice_reference:'공고 확인 필요',conflict_candidates:'상충 근거 확인 필요',rejected_evidence:'근거 재검토',not_found_in_processed_input:'처리한 원문에서 미확인',not_processed:'미처리'};
+  box.append(text('p',`${result.execution_status} · 입력 응답 수신율 ${((result.input_chunk_coverage||0)*100).toFixed(1)}% · 주장 검사 완료율 ${((result.checked_chunk_coverage||0)*100).toFixed(1)}%`,'badge'));
+  const wrapper=document.createElement('div');wrapper.className='table-wrap';
+  const table=document.createElement('table'),head=document.createElement('tr');
+  for(const label of ['항목','요약','확인 상태'])head.append(text('th',label));
+  table.append(head);let citations=[];
+  for(const field of result.fields||[]){
+    const row=document.createElement('tr'),body=document.createElement('td');
+    for(const claim of field.claims||[]){
+      const numbers=[];
+      for(const cite of claim.citations||[]){citations.push(cite);numbers.push('['+citations.length+']');}
+      body.append(text('p',claim.text+' '+numbers.join(' ')));
+    }
+    if(!body.childNodes.length)body.append(text('span',field.state==='not_processed'?'아직 이 항목을 처리하지 못했습니다.':'확인된 내용이 없습니다.'));
+    row.append(text('th',field.label),body,text('td',states[field.state]||field.state));table.append(row);
+  }
+  wrapper.append(table);box.append(wrapper);
+  const evidence=document.createElement('details');evidence.append(text('summary',`원문 근거 ${citations.length}개 보기`));
+  citations.forEach((cite,index)=>{evidence.append(text('p',`[${index+1}] ${cite.file_name||''} · ${cite.locator||cite.chunk_id}`,'muted'),text('div',cite.quote,'source'));});
+  if(citations.length)box.append(evidence);
+  if(result.missing_information?.length){box.append(text('h3','추가 확인할 항목'));for(const item of result.missing_information)box.append(text('p',item,'muted'));}
+  box.append(text('p','원문 인용 연결을 검사했습니다. 항목별 사실·조건·누락은 원문과 함께 검토하세요.','muted'));
+}
+function showSummaryJob(job){
+  summaryJob=job;
+  $('summary-progress').hidden=false;$('summary-progress').max=Math.max(1,job.total_batches);$('summary-progress').value=job.completed_batches;
+  const usage=job.usage||{},budget=job.budget||{};
+  const title=job.status==='completed'?'요약 처리가 끝났습니다.':job.status==='needs_attention'||job.status==='error'?'요약 처리가 완료되지 않았습니다. 실행 진단을 확인하세요.':'전체 문서 요약을 생성하고 있습니다. 이 창에서 진행 상황을 확인할 수 있습니다.';
+  $('summary-job-status').className=['needs_attention','error'].includes(job.status)?'error':'muted';
+  $('summary-job-status').textContent=`${title} ${job.completed_batches}/${job.total_batches} 배치 · 실패 ${job.failed_batches||0} · 사용·예약 ${budget.calls_used_or_reserved||0}회 · 입력 ${usage.reported_input_tokens||0} / 출력 ${usage.reported_output_tokens||0} 토큰`;
+  const diagnostics=job.error_diagnostics||(job.error_diagnostic?[job.error_diagnostic]:[]);
+  for(const item of diagnostics)$('summary-job-status').append(text('p',`오류: ${item.message||item.code||'실행 기록 확인'}${item.http_status?' (HTTP '+item.http_status+')':''}${item.api_error_code?' · '+item.api_error_code:''}`));
+  controls();
+}
+async function pollSummary(identifier){
+  clearTimeout(summaryTimer);
+  try{
+    const job=await api('/api/summary/status?job_id='+encodeURIComponent(identifier));showSummaryJob(job);
+    if(summaryRunning()){summaryTimer=setTimeout(()=>pollSummary(identifier),1500);return;}
+    await refresh();await prepareSummary();
+  }catch(error){
+    $('summary-job-status').textContent='진행 상태를 다시 확인합니다. '+error.message;
+    summaryTimer=setTimeout(()=>pollSummary(identifier),5000);
+  }
+}
 function inline(node,value){for(const part of value.split(/(\*\*[^*]+\*\*)/g)){if(part.startsWith('**')&&part.endsWith('**'))node.append(text('strong',part.slice(2,-2)));else node.append(document.createTextNode(part));}return node;}
 function markdown(value){let box=document.createElement('div');box.className='answer';let lines=value.split('\n');const cells=line=>line.trim().replace(/^\||\|$/g,'').split('|').map(c=>c.trim());for(let i=0;i<lines.length;i++){let line=lines[i];if(line.includes('|')&&i+1<lines.length&&/^[\s|:-]+$/.test(lines[i+1])&&lines[i+1].includes('--')){let wrap=document.createElement('div');wrap.className='table-wrap';let table=document.createElement('table'),head=document.createElement('tr');for(const cell of cells(line))head.append(inline(document.createElement('th'),cell));table.append(head);i+=2;while(i<lines.length&&lines[i].includes('|')){let row=document.createElement('tr');for(const cell of cells(lines[i]))row.append(inline(document.createElement('td'),cell));table.append(row);i++;}i--;wrap.append(table);box.append(wrap);}else if(/^#{1,4}\s/.test(line)){box.append(inline(document.createElement('h3'),line.replace(/^#{1,4}\s+/,'')));}else if(line.trim()){box.append(inline(document.createElement('p'),line.replace(/^[-*]\s+/,'• ')));}}return box;}
 function showResult(result){$('answer').replaceChildren();$('evidence').replaceChildren();$('answer').append(text('span',`${result.status} · ${result.execution_status||'조회'}`,'badge'));$('answer').append(markdown(result.markdown||'표시할 답변이 없습니다.'));if(result.error_diagnostic)$('answer').append(text('p',`${result.error_diagnostic.code}: ${result.error_diagnostic.message}`,'error'));if(result.answer_focus_audit?.needs_scope_review)$('answer').append(text('p','일반 추진 원칙이 포함되어 있습니다. 구체적인 사업 범위를 충분히 답했는지 원문과 대조하세요.','muted'));if(result.missing_information?.length)$('answer').append(text('p','추가 확인: '+result.missing_information.join(', '),'muted'));if(result.candidate_documents?.length)$('answer').append(text('p','확인할 문서: '+result.candidate_documents.map(d=>`${d.agency||''} ${d.project_title||d.file_name}`).join(' / '),'muted'));
 let flagged=result.claim_citation_audit?.flagged_claim_indices||[];if(flagged.length)$('answer').append(text('p',`인용 연결 검토: ${flagged.map(i=>i+1).join(', ')}번 문장의 요구사항 명칭이 붙은 인용에서 빠졌을 수 있습니다. 원문과 대조하세요.`,'muted'));let quotes=[];for(const [i,claim]of(result.claims||[]).entries())for(const cite of claim.citations||[])quotes.push({claim:claim.text,claim_index:i,doc_id:claim.doc_id,...cite});for(const q of quotes){let d=document.createElement('details');d.open=true;d.append(text('summary',`${q.claim_index+1}. ${q.claim}`));d.append(text('p',`${q.doc_id||''} · ${q.locator||q.chunk_id}`,'muted'));d.append(text('div',q.quote,'source'));$('evidence').append(d);}if(!quotes.length)for(const c of (result.source_chunks||[]).slice(0,8)){let d=document.createElement('details');d.append(text('summary',`${c.file_name||c.doc_id} · ${c.locator||c.chunk_id}`));d.append(text('div',c.text,'source'));$('evidence').append(d);}}
 function renderRecord(record){currentRecord=record;showResult(record.result);$('feedback').style.display=record.reviewable?'block':'none';$('judgements').replaceChildren();$('notes').value='';for(const [key,label]of Object.entries(labels)){let l=text('label',label);l.htmlFor=key;let s=document.createElement('select');s.id=key;for(const [value,title]of [['','미판정'],['true','통과'],['false','보완 필요']]){let o=text('option',title);o.value=value;s.append(o);}$('judgements').append(l,s);}}
 $('keyword').oninput=()=>documents(true);
-$('select').onclick=()=>action(async()=>{let filters={};if($('agency').value.trim())filters.agency=$('agency').value.trim();if($('year').value)filters.document_year=Number($('year').value);await api('/api/select',{doc_ids:selected(),filters});});
+$('documents').onchange=controls;
+$('generate-summary').onclick=()=>action(async()=>{
+  if(!summaryPlan)throw Error('요약할 문서를 먼저 선택 적용하세요.');
+  const job=await api('/api/summary/generate',{doc_id:summaryPlan.doc_id,plan_id:summaryPlan.plan_id,allow_api:true});
+  showSummaryJob(job);pollSummary(job.job_id);
+});
+$('select').onclick=()=>action(async()=>{let filters={};if($('agency').value.trim())filters.agency=$('agency').value.trim();if($('year').value)filters.document_year=Number($('year').value);await api('/api/select',{doc_ids:selected(),filters});await refresh();await prepareSummary();});
 $('generation').onclick=()=>action(async()=>api('/api/generation',{enabled:$('live').checked,approved_doc_ids:selected()}));
 $('ask').onclick=()=>action(async()=>{let question=$('question').value.trim();if(!question)throw Error('질문을 입력하세요.');renderRecord(await api('/api/ask',{question,request_id:crypto.randomUUID()}));});
 $('reset').onclick=()=>action(async()=>{await api('/api/reset',{});$('answer').replaceChildren(text('p','새 문서를 선택하세요.','muted'));$('evidence').replaceChildren();$('feedback').style.display='none';});
 $('resume').onclick=()=>action(async()=>api('/api/resume',{}));
-$('summary').onclick=()=>action(async()=>{let ids=selected();if(ids.length!==1)throw Error('요약을 볼 문서 하나를 선택하세요.');let value=await api('/api/summary?doc_id='+encodeURIComponent(ids[0]));currentRecord=null;$('feedback').style.display='none';if(value.status==='unavailable'){showResult({status:'unavailable',markdown:'이 문서의 저장된 전체 요약이 없습니다. 기존 Phase 5 실행 결과를 확인하세요.'});}else{showResult(value.result);}});
+$('summary').onclick=()=>action(async()=>{const ids=selected();if(ids.length!==1)throw Error('요약할 문서 하나를 선택하세요.');const saved=await api('/api/summary?doc_id='+encodeURIComponent(ids[0]));if(saved.status==='saved_summary')showSummary(saved.result);else $('summary-content').replaceChildren(text('p','저장된 요약이 없습니다. 문서 선택 적용 후 전체 요약 생성을 누르세요.','muted'));});
 $('save-review').onclick=()=>action(async()=>{let judgements={};for(const key of Object.keys(labels)){let v=$(key).value;judgements[key]=v===''?null:v==='true';}let value=await api('/api/review',{turn_id:currentRecord.turn_id,reviewer:$('reviewer').value,notes:$('notes').value,judgements});$('report').textContent=JSON.stringify(value.report,null,2);});
 $('refresh-report').onclick=()=>action(async()=>{$('report').textContent=JSON.stringify(await api('/api/report'),null,2);});
-refresh().catch(e=>{$('status').className='error';$('status').textContent=e.message;});
+refresh().then(async()=>{if(summaryRunning()){showSummaryJob(summaryJob);pollSummary(summaryJob.job_id);}else await prepareSummary();}).catch(e=>{$('status').className='error';$('status').textContent=e.message;});
 </script></html>

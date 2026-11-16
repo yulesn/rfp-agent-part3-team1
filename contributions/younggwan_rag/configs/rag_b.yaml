@@ -1,0 +1,12 @@
+# B: A의 검색을 유지하고 생성 모델·지원되는 추론 설정만 변경합니다.
+generation:
+  enabled: false
+  model: gpt-6.1-sol
+  reasoning_effort: low
+  max_calls: 8
+  max_total_input_bytes: 600000
+retrieval:
+  method: rrf
+  top_k: 8
+semantic:
+  enabled: false

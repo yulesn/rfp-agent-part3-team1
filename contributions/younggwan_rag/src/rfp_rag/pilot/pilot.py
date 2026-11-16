@@ -70,6 +70,12 @@ def readiness(env):
                           '실제 API 지연·사용량 측정']}
 
 
+def embedding_usage(env):
+    """Query embeddings are accounted separately from grounded generation."""
+    report = getattr(env['index'], 'usage_report', None)
+    return report() if report else None
+
+
 def read_record(folder):
     record = load_json(Path(folder) / 'record.json')
     payload = {k: v for k, v in record.items() if k != 'fingerprint'}
@@ -245,6 +251,7 @@ class PilotSession:
         folder = self.folder / 'turns' / turn_id
         folder.mkdir(exist_ok=False)
         before = self.chat.llm.usage_report()
+        embedding_before = embedding_usage(self.env)
         # Fail before any API call if local storage cannot record the request.
         write_new(folder / 'request.json', {'question': question, 'request_id': request_id,
             'active_doc_ids': self.chat.active_doc_ids, 'filters': self.chat.filters,
@@ -259,7 +266,7 @@ class PilotSession:
                 'markdown': '요청을 완료하지 못했습니다. 실행 진단을 확인하세요.',
                 'error_diagnostic': safe_llm_diagnostic(error)}
         return self._record(folder, question, result, before, started, request_id=request_id,
-                            submission_context=submission_context)
+                            submission_context=submission_context, embedding_before=embedding_before)
 
     def saved_summary(self, doc_id, *, run_folder=None):
         did = self.env['registry'].resolve_doc_ids([doc_id])[0]
@@ -270,7 +277,8 @@ class PilotSession:
         return {'status': 'saved_summary', 'result': result, 'doc_id': did, 'api_calls': 0,
             'semantic_quality_verified': False}
 
-    def _record(self, folder, question, result, before, started, *, request_id, submission_context):
+    def _record(self, folder, question, result, before, started, *, request_id, submission_context,
+                embedding_before=None):
         result = copy.deepcopy(result)
         result['claim_citation_audit'] = claim_citation_audit(result)
         after = self.chat.llm.usage_report()
@@ -291,6 +299,13 @@ class PilotSession:
                 and (result.get('answer_generated') or result.get('status') in {'insufficient_evidence', 'needs_clarification'})),
             'novelty': 'unverified', 'independent_quality_verified': False,
             'cost_estimate': estimate_usage_cost(delta, self.settings['pricing']) if self.settings.get('pricing') else None}
+        embedding_after = embedding_usage(self.env)
+        if embedding_after is not None:
+            record['embedding_usage_cumulative'] = embedding_after
+            record['embedding_usage_delta'] = {
+                key: embedding_after.get(key, 0) - (embedding_before or {}).get(key, 0)
+                for key in ('api_calls', 'cache_hits', 'failed_attempts',
+                            'reported_input_tokens', 'attempted_input_bytes')}
         record['fingerprint'] = digest(record)
         try:
             write_new(folder / 'record.json', record)
@@ -329,6 +344,9 @@ def session_report(folder):
     real_completed = [r for r in completed if r[0]['execution_origin'] == 'live_openai']
     real_correct = sum(all(r[1]['judgements'].values()) for r in real_completed)
     usage = {key: sum(r['usage_delta'][key] for r in records) for key in COUNTERS}
+    embedding_totals = {key: sum(r.get('embedding_usage_delta', {}).get(key, 0) for r in records)
+                        for key in ('api_calls', 'cache_hits', 'failed_attempts',
+                                    'reported_input_tokens', 'attempted_input_bytes')}
     latencies = {}
     for origin in sorted({r['latency_origin'] for r in records}):
         values = sorted(r['latency_ms'] for r in records if r['latency_origin'] == origin)
@@ -342,7 +360,8 @@ def session_report(folder):
         'execution_status': 'needs_attention' if failures or incomplete else 'records_complete',
         'failed_turns': failures, 'failed_turn_diagnostics': [_failure_diagnostic(r) for r in records
             if r['result'].get('execution_status') in FAILED],
-        'incomplete_turns': incomplete, 'usage': usage, 'latency': latencies,
+        'incomplete_turns': incomplete, 'usage': usage, 'embedding_usage': embedding_totals,
+        'latency': latencies,
         'claim_citation_review': claim_review_summary([claim_citation_audit(r['result']) for r in records]),
         'human_review_status': 'review_complete' if reviews and len(completed) == len(reviews) else 'review_pending',
         'reviewable_turns': len(reviews), 'reviewed_turns': len(completed), 'fully_correct_reviewed_turns': correct,

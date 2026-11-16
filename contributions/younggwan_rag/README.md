@@ -2,8 +2,13 @@
 
 선정한 네 노트북과 실제 구현인 `src/rfp_rag/`를 공유합니다.
 개인 프로젝트의 Phase 1–8 기준선에서 실행에 필요한 Python 모듈을 추렸으며,
-기존 생성 모델 `gpt-5.4-mini`와 BM25 + 문자 TF-IDF/RRF 검색을 유지했습니다.
-SBERT/의미 검색 추가와 생성 모델 비교는 후속 Task 2입니다.
+기존 A 조합(`gpt-5.4-mini` + BM25·문자 TF-IDF/RRF)은 `configs/rag_a.yaml`에 보존했습니다.
+현재 D 설정(`configs/rag.yaml`, `configs/rag_d.yaml`)은 `gpt-6.1-sol` + 기존 검색 +
+`text-embedding-3-large` 의미 검색입니다.
+
+**D 실행은 [README_D_PROFILE.md](README_D_PROFILE.md)를 따르세요.**
+A/D의 원문·인덱스·캐시·실행 기록을 별도 workspace에 보관합니다.
+아래 기존 실행 예제는 A를 재현하며, 설정 없이 실행하는 기존 노트북도 A를 유지합니다.
 
 ## 1. 포함 범위와 실행 순서
 
@@ -27,7 +32,7 @@ SBERT/의미 검색 추가와 생성 모델 비교는 후속 Task 2입니다.
 cd contributions/younggwan_rag
 uv sync --extra notebook --extra openai
 uv run python -m unittest discover -s tests -t tests -q
-uv run rfp-rag build --demo --workspace workspaces/demo --config configs/rag.yaml
+uv run rfp-rag build --demo --workspace workspaces/demo --config configs/rag_a.yaml
 uv run rfp-rag catalog --workspace workspaces/demo
 uv run rfp-rag search --workspace workspaces/demo --doc-id DEMO_A --question "사업 예산과 기간은?"
 uv run rfp-rag ask --workspace workspaces/demo --doc-id DEMO_A --question "사업예산은?" --question "그 기간에 안정화도 포함돼?"
@@ -61,11 +66,44 @@ cp -n .env.example .env
 uv run --env-file .env rfp-rag serve --workspace workspaces/demo --port 8765
 ```
 
-웹 왼쪽의 **답변 생성 설정**을 열고 **실제 API 답변 생성**을 체크한 뒤,
+웹 왼쪽의 **답변 생성 설정**을 열고 **실제 API 답변·요약 생성**을 체크한 뒤,
 **선택 문서 API 설정 적용**을 누르고 질문을 제출합니다.
 `retrieved / disabled`이면 원문 검색 모드입니다. 생성이 켜진 상태에서만 선택 문서 근거를 API로 전송합니다.
 모델 호출은 사용자 제출 시 수행하며, 문서 허용 목록·호출 수·입력량 상한을 적용합니다.
 키를 노트북 셀, Git, 화면 캡처에 넣지 않습니다.
+
+### 선택한 문서의 전체 요약 생성
+
+1. 문서 **하나**를 선택하고 **선택 적용**을 누릅니다. 오른쪽 **선택 문서 전체 요약**에
+   전체 청크·배치 수와 예상 API 호출 수가 표시됩니다. 이 단계는 API를 호출하지 않습니다.
+2. 왼쪽에서 **실제 API 답변·요약 생성**을 체크하고 **선택 문서 API 설정 적용**을 누릅니다.
+3. **전체 요약 생성**을 누릅니다. 진행률을 확인한 뒤 11개 항목과 원문 근거를 확인합니다.
+4. 다시 접속했을 때는 문서를 선택 적용하거나 **저장 요약 열기**를 누르면 됩니다.
+   저장 결과 조회와 동일 요청 재전송은 추가 생성 호출을 하지 않습니다.
+
+기존 Phase 5 실행 결과가 없어도 현재 workspace에 색인한 문서를 요약합니다.
+검색 상위 몇 개 청크를 요약하는 방식이 아니라, 선택 문서의 모든 청크를 나누어 처리합니다.
+새 문서는 추출 원문 JSONL에 포함하여 workspace를 구축한 뒤 같은 흐름으로 사용합니다.
+이 변경에는 웹 파일 업로드나 PDF 직접 추출 기능은 포함하지 않습니다.
+
+요약은 workspace에 저장된 생성 모델(A/C: `gpt-5.4-mini`, B/D: `gpt-6.1-sol`)을 사용합니다.
+요약 생성 자체에는 질문 임베딩 API를 호출하지 않습니다. 긴 문서는 여러 번 생성 API를
+호출하며, **계획에 표시된 호출 수를 확인하고 생성 버튼을 누르세요.**
+
+요약 한도는 질문 세션의 8회 한도와 별도입니다. 문서·모델별로 호출 및 입력량을 영속
+기록하며, 기본 설정은 최대 30회·직렬화된 요청 입력 600,000바이트입니다. 전체 문서가
+남은 한도를 넘으면 호출 전에 중단합니다. 새로고침·대화 초기화로 이 한도가 초기화되지 않습니다.
+실패·중단 배치를 자동으로 유료 재시도하지 않으며, 미처리 상태를 완료로 표시하지 않습니다.
+
+결과와 실행 기록은 workspace의 `phase5_outputs/final_source_units/web-summary-*/`에 저장됩니다.
+`web_job.json`은 진행·사용량, `journal.json`은 배치별 예약·호출 기록,
+`content_documents/문서ID/…/answer.md`와 `review.csv`는 요약과 원문 검토표입니다.
+웹의 **실행·검토 현황 갱신**에도 질문과 구분된 `web_summary` 기록이 포함됩니다.
+인용 연결 검사·전체 청크 처리 완료는 요약 내용의 의미 정확도 통과와 구분합니다.
+
+기존 A~D 패치를 적용하여 만든 workspace는 검색 인덱스와 문서 임베딩을 재구축하지 않고
+사용할 수 있습니다. 호환 검사는 알려진 기존 코드 묶음과 이번 요약 변경에만 한정되며,
+원문·청크·인덱스·벡터 파일 검사는 계속 적용합니다. 상세 검증은 [WEB_SUMMARY_VALIDATION.md](WEB_SUMMARY_VALIDATION.md)를 참고하세요.
 
 CLI에서 실제 답변을 생성하려면 다음처럼 실행합니다.
 
@@ -79,7 +117,7 @@ uv run rfp-rag ask --workspace workspaces/demo --doc-id DEMO_A --question "완�
 기존 개인 프로젝트의 `rfp_phase5_local_20261111/data/source_documents.jsonl`을 사용할 수 있습니다.
 
 ```bash
-uv run rfp-rag build --source /absolute/path/source_documents.jsonl --workspace workspaces/team-v1 --config configs/rag.yaml
+uv run rfp-rag build --source /absolute/path/source_documents.jsonl --workspace workspaces/team-v1 --config configs/rag_a.yaml
 uv run rfp-rag catalog --workspace workspaces/team-v1
 uv run --env-file .env rfp-rag serve --workspace workspaces/team-v1 --port 8765
 ```
@@ -94,7 +132,7 @@ JSONL의 각 행에는 `doc_id`, `canonical_doc_id`, 원본 파일 `sha256`, `fi
 
 새 workspace를 구축할 때 현재 환경에서 청크와 인덱스를 생성합니다. OpenAI 임베딩 API를 호출하지 않습니다.
 원문·코드·설정·라이브러리가 바뀌면 기존 workspace를 덮어쓰지 않고 새 경로를 사용합니다.
-설정은 `configs/rag.yaml`이며, 실행 예산·생성 모델을 바꾸면 새 workspace를 만듭니다.
+설정은 `configs/rag_a.yaml`이며, 실행 예산·생성 모델을 바꾸면 새 workspace를 만듭니다.
 
 ## 5. Phase 1–8 개발 내역
 
