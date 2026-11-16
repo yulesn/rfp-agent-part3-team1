@@ -27,4 +27,13 @@ def ask(req: AskRequest) -> AskResponse:
     # 1. 서버 시작 시 graph = build_graph(load_config()) 를 한 번만 만들어 두기
     # 2. graph.invoke({"messages": [("user", req.question)]}) 실행
     # 3. 마지막 메시지 → answer, 도구 결과에서 출처 정보 → sources 로 담아 반환
-    raise NotImplementedError
+    return AskResponse(
+        answer=f"입력하신 질문은 '{req.question}' 입니다. 아직 AI 엔진 연동 전이라 가짜 답변을 보내드립니다!",
+        sources=[
+            {
+                "doc_id": "2026_샘플_제안요청서.pdf",
+                "title": "샘플 사업 제안요청서",
+                "snippet": "본 사업의 목적은 샘플 테스트를 진행하는 것입니다.",
+            }
+        ],
+    )
