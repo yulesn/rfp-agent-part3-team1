@@ -57,13 +57,37 @@ documents = retrieve(question, config)
 각자 PC에서 같은 코드를 실행하는 로컬 앱입니다. 다른 사람의 localhost 주소에 접속하는 방식이 아닙니다.
 팀의 최종 채팅 UI(`app/streamlit_app.py`)와 별도이며 답변 생성 에이전트는 호출하지 않습니다.
 
-### 팀 DB를 받아서 검색할 때
+### 팀 기본 에이전트와 연결 시험
 
-Drive에서 받은 팀 DB 폴더 전체를 `data/vectorstore/`에 놓고 같은 모델·컬렉션 설정을 사용합니다.
-이미 받은 DB를 다시 임베딩할 필요는 없습니다. 질문 임베딩용 API 키는 각 실행 환경에 설정합니다.
+`scripts/check_agent_retrieval.py`는 팀 `build_graph()`에 준비된 `search_rfp`만 등록하여
+질문 → 검색 도구 → Chroma → 근거 답변 흐름을 확인합니다.
+도구는 그래프와 같은 설정을 받아 검색합니다. 기존 `build_graph(config)` 호출 방식과 기본 도구 목록은 유지합니다.
+유영관 님의 `contributions/younggwan_rag`는 별도 구현이므로 이 시험만으로 해당 구현까지 통합한 것은 아닙니다.
 
 ```bash
-uv run streamlit run app/retrieval_demo.py --server.address 127.0.0.1 -- --config configs/default.yaml
+# 저장 상태 확인. API를 호출하지 않습니다.
+uv run python scripts/check_agent_retrieval.py
+
+# 질문 임베딩과 답변 생성 API를 호출합니다. 기본 설정의 gpt-4o-mini를 사용합니다.
+uv run python scripts/check_agent_retrieval.py --live --question "한영대학교 트랙운영 학사정보시스템 고도화의 사업 예산과 기간은?" --report data/processed/agent-retrieval-check.json
+```
+
+문서 전체를 다시 임베딩하지 않습니다. `connection_passed`는 도구 호출·응답·최종 답변이 이어졌는지 뜻합니다.
+정답·출처가 실제 원문과 일치하는지는 별도로 확인합니다. 기존 보고서는 덮어쓰지 않으므로 새 실행에는 새 경로를 지정하세요.
+전체 자동 테스트 75개와 Ruff를 통과했습니다. 실제 API 답변까지 성공한 것은 현재 미확인입니다.
+2026-11-16 두 차례 실행 모두 HTTP 429 요청 제한으로 중단됐습니다.
+오류 확인 응답의 코드는 `rate_limit_exceeded`, 유형은 `requests`였습니다. 요청 제한 해소 후 재확인합니다.
+
+### 팀 DB를 받아서 검색할 때
+
+공유받은 팀 DB 폴더 전체를 `data/vectorstore/`에 놓고 같은 모델·컬렉션 설정을 사용합니다.
+이미 받은 DB를 다시 임베딩할 필요는 없습니다. 질문 임베딩용 API 키는 각 실행 환경에 설정합니다.
+2026-11-16 생성한 공유 ZIP에는 `configs/team_rfp.yaml`, 실행 환경 버전, 검사 보고서와 사용법이 포함되어 있습니다.
+현재 ZIP은 로컬에 준비했으며 팀 Drive에는 아직 업로드하지 않았습니다.
+
+```bash
+uv run python scripts/retrieval_index.py --config configs/team_rfp.yaml inspect
+uv run streamlit run app/retrieval_demo.py --server.address 127.0.0.1 -- --config configs/team_rfp.yaml
 ```
 
 ### Colab에서 실행할 때
@@ -89,15 +113,35 @@ uv run python scripts/retrieval_index.py doctor
 기본 샘플 설정은 `configs/retrieval_sample.yaml`: 1000자/겹침 200자, `text-embedding-3-small`, top_k=5입니다.
 샘플 DB는 `data/vectorstore_sample_openai_v1/`, 컬렉션은 `rfp_sample_v1`입니다.
 
+### 파싱 결과 documents.jsonl만 받은 경우
+
+각 행에 `doc_id`, `text`, `metadata`가 있는 파싱 결과를 받으면 파싱을 반복하지 않고 청크 파일을 만듭니다.
+아래 예시는 받은 파일을 `data/processed/received/documents.jsonl`에 둔 경우입니다.
+
+```bash
+uv run python scripts/export_chunks.py --documents data/processed/received/documents.jsonl --out data/processed/received/chunks.jsonl --report data/processed/received/export-report.json
+```
+
+재민 님의 `chunk_documents()`와 YAML의 청킹 설정을 사용하며 임베딩 API는 호출하지 않습니다.
+각 행에는 `doc_id`, 전체 본문 `text`, `metadata`가 있어야 합니다.
+문서 ID 중복·빈 본문·청크 메타데이터를 검사하고 검색용 `chunk_id`를 보완합니다.
+기존 출력 파일은 덮어쓰지 않습니다. 이미 생성했다면 아래 입력 검사 단계로 진행하고, 다른 설정의 결과는 새 경로에 저장합니다.
+
 ### 이미 청크를 받은 경우
 
 JSONL의 각 행은 다음 형태입니다. 본문과 값은 예시이며 metadata의 실제 키 이름은 전달받은 것을 보존합니다.
 
 ```json
-{"page_content":"사업 예산은 1억원입니다.","metadata":{"doc_id":"사업.hwp","chunk_id":"사업.hwp#0","사업 금액":100000000}}
+{"page_content":"사업 예산은 1억원입니다.","metadata":{"doc_id":"사업.hwp","chunk_index":0,"사업 금액":100000000,"입찰 참여 마감일":"2026-11-30 18:00:00"}}
 ```
 
-자동 검사: 빈 본문, doc_id/chunk_id 누락, `doc_id#순번` 형식, 중복 ID, 금액 정수, 날짜 YYYY-MM-DD.
+문서 처리 코드가 넘기는 `doc_id`와 `chunk_index`를 받습니다. 검색 입력 단계에서 `chunk_id`를
+`doc_id#chunk_index` 형식으로 보완하고 원래 `chunk_index`도 유지합니다. 표 구분선 제거로 생긴 순번의 빈 구간은 다시 매기지 않습니다.
+기존처럼 `doc_id`와 `chunk_id`를 직접 넘겨도 됩니다. 두 식별자 형식을 함께 주면 같은 청크를 가리켜야 합니다.
+
+자동 검사: 빈 본문, 문서 ID·청크 순번/ID 누락, 잘못된 순번·ID, 중복 ID, 금액 정수, 유효한 날짜·시간.
+날짜는 `YYYY-MM-DD`와 `YYYY-MM-DD HH:MM:SS`를 허용합니다. 메타데이터 키 이름과 날짜·시간 값은 바꾸지 않고 저장·검색 결과에 보존합니다.
+시간 보존은 입력·저장을 위한 처리이며 날짜 범위 필터를 구현했다는 의미는 아닙니다.
 본 베이스라인의 metadata 값은 문자열·숫자·불리언만 허용합니다. 빈 값은 키를 생략합니다.
 원문과의 내용 일치, 파싱 누락, 페이지 정확성은 별도로 확인해야 합니다.
 
@@ -135,6 +179,11 @@ uv run python scripts/retrieval_sample.py search --query "이 사업의 예산�
 
 팀 전체 DB를 만들 때는 명령의 **서브명령 앞에** `--config configs/default.yaml`을 지정합니다.
 완성된 문서 처리 코드와 원본이 준비되면 기존 `scripts/build_index.py`로 전체 파이프라인을 실행할 수 있습니다.
+GitHub의 최신 `build_index.py`는 기존 `documents.jsonl`이 있으면 파싱을 생략합니다.
+청크는 메모리의 목록으로 임베딩 함수에 전달하며 청크 JSONL은 별도로 저장하지 않습니다.
+중간 청크를 파일로 검사·보관하려면 위 `export_chunks.py`를 사용합니다.
+문서 임베딩은 `embedding.batch_size`(기본 128개)로 요청을 나누어 처리합니다.
+청크 길이 또는 모델이 달라지면 요청당 토큰 제한도 함께 확인해야 합니다.
 
 ```python
 from rfp_agent.config import load_config
@@ -163,12 +212,21 @@ for document in documents:
 
 ## 확인 결과와 남은 범위
 
-2026-11-15 실제 제공 텍스트 3문서·9청크로 임베딩 → 저장 → 별도 프로세스 재접속 → 검색을 확인했습니다.
-질문 2건 모두 1순위 청크에 근거가 있었습니다: 한영대학교 사업의 130,000,000원·계약일로부터 3개월,
-한국연구재단 UICC 사업의 SW 개발비 92,300,000원 이내. 답변 생성 LLM은 호출하지 않았습니다.
+2026-11-16 재민 님의 `documents.jsonl` 100문서를 받아 같은 청킹 함수로 14,329청크를 재현했습니다.
+청크 크기는 1000자, 중첩은 200자이며 최초 14,679개에서 표 구분선 350개를 제거한 결과입니다.
+기존 Drive CSV와 파일명 100개가 모두 일치합니다. 앞서 실행한 공개 RFP/PyMuPDF 자료와는 다른 묶음입니다.
 
-이는 소량 연결 확인입니다. 원본 전체 파싱·팀 최종 청킹·팀 전체 DB·검색 품질 평가·에이전트 통합은 남아 있습니다.
-샘플 페이지 정보는 없어 페이지 인용 품질도 아직 검증하지 않았습니다.
+OpenAI `text-embedding-3-small`로 임베딩하여 `data/vectorstore/`의 `rfp` 컬렉션에 저장했습니다.
+새 프로세스에서 다시 열어 14,329개 본문·메타데이터가 입력과 모두 같은지 확인했습니다.
+질문 3개는 모두 상위 5개 안에서 기대한 근거를 찾았고 기관 일치·예산 범위 조건도 통과했습니다.
+한영대학교 예산·기간과 한국연구재단 SW 개발비 근거는 1순위, 한국생산기술연구원 사업기간 근거는 2순위였습니다.
+실제 문서 임베딩 성공 응답의 입력 토큰 합계는 8,221,513입니다.
+
+위 DB·검색 검사에서는 답변 생성 LLM을 호출하지 않았으며 정식 검색 품질 평가도 아닙니다.
+별도 에이전트 시험에서는 LLM 호출을 시도했지만 HTTP 429로 중단됐습니다.
+공유 ZIP은 로컬에 준비했고, 팀 Drive 업로드·다른 팀원 환경 재현·에이전트 통합·main 병합은 남아 있습니다.
+코드는 검색 작업 브랜치에서 리뷰하며, DB ZIP은 별도 공유 위치가 정해지면 전달합니다.
+수령 데이터에 페이지 번호가 없어 파일명·청크 ID까지 출처를 보존하며 페이지 인용은 검증하지 않았습니다.
 
 ```bash
 # 자동 테스트는 테스트 전용 임베딩을 사용하며 OpenAI API를 호출하지 않습니다.
