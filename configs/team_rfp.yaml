@@ -1,0 +1,15 @@
+# 재민 님의 documents.jsonl에서 재현한 100문서·14,329청크를 사용합니다.
+paths:
+  processed_dir: data/processed/team_rfp_20261116
+  vectorstore_dir: data/vectorstore
+chunking:
+  chunk_size: 1000
+  chunk_overlap: 200
+embedding:
+  provider: openai
+  model: text-embedding-3-small
+  batch_size: 128
+vectorstore:
+  collection_name: rfp
+retrieval:
+  top_k: 5

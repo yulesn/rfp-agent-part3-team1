@@ -16,6 +16,7 @@ chunking:
 embedding:
   provider: openai               # openai | huggingface
   model: text-embedding-3-small
+  batch_size: 128                # API 요청당 청크 수. 청킹의 chunk_size(문자 수)와 별개
 
 vectorstore:
   collection_name: rfp

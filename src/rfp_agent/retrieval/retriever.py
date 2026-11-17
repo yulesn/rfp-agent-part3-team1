@@ -5,13 +5,26 @@
 - 실험 아이디어: top_k 조정, 메타데이터 필터, MMR, BM25 + 벡터 하이브리드 검색, 리랭커 추가.
 """
 
+from chromadb.api.types import validate_where
 from langchain_core.documents import Document
 
 from rfp_agent.retrieval.vectorstore import load_vectorstore
 
 
 def retrieve(query: str, config: dict, filters: dict | None = None) -> list[Document]:
-    """질문과 관련된 청크를 top_k 개 돌려줍니다. filters 예: {"발주기관": "OO시청"}"""
-    # TODO: 아래는 가장 단순한 버전. 실험하며 개선하세요.
+    """관련 청크를 반환합니다. filters는 Chroma where 문법, 조건 불일치는 []입니다.
+
+    예: {"발주기관": "OO시청"}, {"사업금액": {"$gte": 500000000}}
+    여러 조건은 {"$and": [{...}, {...}]} 형태로 전달하세요.
+    """
+    if not isinstance(query, str) or not query.strip():
+        raise ValueError("query는 비어 있지 않은 문자열이어야 합니다.")
+    top_k = config["retrieval"]["top_k"]
+    if type(top_k) is not int or top_k < 1:
+        raise ValueError("retrieval.top_k는 1 이상의 정수여야 합니다.")
+    if filters == {}:
+        filters = None
+    if filters is not None:
+        validate_where(filters)
     vs = load_vectorstore(config)
-    return vs.similarity_search(query, k=config["retrieval"]["top_k"], filter=filters)
+    return vs.similarity_search(query.strip(), k=top_k, filter=filters)
