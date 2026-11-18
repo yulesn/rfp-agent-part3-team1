@@ -1,0 +1,14 @@
+# 소량 검색 연결 검증용 설정. 팀 전체 인덱스와 경로·컬렉션을 분리합니다.
+paths:
+  processed_dir: data/processed/retrieval_sample
+  vectorstore_dir: data/vectorstore_sample_openai_v1
+chunking:
+  chunk_size: 1000
+  chunk_overlap: 200
+embedding:
+  provider: openai
+  model: text-embedding-3-small
+vectorstore:
+  collection_name: rfp_sample_v1
+retrieval:
+  top_k: 5
