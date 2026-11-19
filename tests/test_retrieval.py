@@ -223,3 +223,45 @@ def test_search_tool_formats_sources_and_empty_result(monkeypatch):
     assert "원문 근거" in result and "a.pdf#1" in result and "페이지: 2" in result
     monkeypatch.setattr(module, "retrieve", lambda *args: [])
     assert "검색된 근거가 없습니다" in module.search_rfp.invoke({"query": "예산"})
+
+
+def test_title_scope_uses_team_search_tool_and_respects_explicit_filters(config, chunks):
+    title = "2024년 공공 교육 플랫폼 구축 용역"
+    for chunk in chunks:
+        if chunk.metadata["doc_id"] == "a.hwp":
+            chunk.metadata["사업명"] = title
+    config["retrieval"]["top_k"] = 1
+    vectorstore.build_vectorstore(chunks, config)
+    query = f"{title}의 산학 예산은?"
+
+    tool = import_module("rfp_agent.agent.tools.search_rfp").make_search_rfp(config)
+    assert "출처: a.hwp" in tool.invoke({"query": query})
+    assert retrieve(query, config, {"doc_id": "b.pdf"})[0].metadata["doc_id"] == "b.pdf"
+    assert retrieve(query, config, {})[0].metadata["doc_id"] == "b.pdf"
+    config["retrieval"]["scope_by_title"] = False
+    assert retrieve(query, config)[0].metadata["doc_id"] == "b.pdf"
+
+
+def test_title_mentions_in_comparison_and_exclusion_do_not_scope(config, chunks):
+    first = "2024년 공공 교육 플랫폼 구축 용역"
+    second = "2025년 지역 산학 협력 플랫폼 구축 용역"
+    for chunk in chunks:
+        chunk.metadata["사업명"] = first if chunk.metadata["doc_id"] == "a.hwp" else second
+    config["retrieval"]["top_k"] = 1
+    vectorstore.build_vectorstore(chunks, config)
+    for query in (
+        f"{first}은 빼고 비슷한 산학 사업 예산을 찾아줘",
+        f"{first}과 유사한 산학 공고의 예산은?",
+        f"{first}과 {second}의 산학 예산은?",
+        f"B재단의 {first} 산학 예산은?",
+    ):
+        assert retrieve(query, config)[0].metadata["doc_id"] == "b.pdf"
+
+
+def test_duplicate_titles_keep_the_full_search(config, chunks):
+    title = "2024년 공공 교육 플랫폼 구축 용역"
+    for chunk in chunks:
+        chunk.metadata["사업명"] = title
+    config["retrieval"]["top_k"] = 1
+    vectorstore.build_vectorstore(chunks, config)
+    assert retrieve(f"{title}의 산학 예산은?", config)[0].metadata["doc_id"] == "b.pdf"
