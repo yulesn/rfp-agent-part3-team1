@@ -4,20 +4,20 @@
 - 답변 근거·출처를 보여주는 게 기본 기능이라, 응답에 출처 목록을 꼭 포함해 주세요.
 """
 
+from typing import List
 from pydantic import BaseModel
 
-
+# 프론트엔드에서 보낼 질문 모양
 class AskRequest(BaseModel):
     question: str
-    # TODO: 대화를 이어가려면 thread_id(대화 ID) 추가
 
+# 출처 1개에 들어갈 정보 3가지
+class SourceItem(BaseModel):
+    doc_id: str
+    title: str
+    snippet: str
 
-class Source(BaseModel):
-    doc_id: str          # 파일명 등 문서 ID
-    title: str = ""      # 사업명
-    snippet: str = ""    # 근거가 된 청크 일부
-
-
+# 백엔드가 돌려줄 최종 답변 모양
 class AskResponse(BaseModel):
     answer: str
-    sources: list[Source] = []
+    sources: List[SourceItem]
