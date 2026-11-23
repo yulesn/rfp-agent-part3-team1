@@ -63,12 +63,13 @@ def test_summary_uses_only_target_doc_and_marks_missing(monkeypatch):
     assert "- **예산**: 230,000천원" in text
     assert "- **하자보수**: 문서에 명시 없음" in text
     assert "a.hwp#3" not in text  # 사용자에게 청크 id 는 안 보임
-    assert "230,000,000원" in llm.prompts[0][-1].content  # 예산 프롬프트에 공고 정보(사업 금액)
+    assert "공고 목록상 사업 금액: 230,000,000원" in llm.prompts[0][-1].content  # 예산엔 공고 목록 값도
+    assert "공고 목록" not in llm.prompts[-1][-1].content  # 다른 항목엔 안 줌
     assert all(f == {"doc_id": "a.hwp"} for f, _ in calls)  # 다른 공고 청크는 안 섞임
     assert len(calls) == len(llm.prompts) == 9  # 메타데이터 2개 항목은 LLM 호출 안 함
 
 
-def test_budget_keyword_chunk_and_metadata_fallback(monkeypatch):
+def test_budget_keyword_chunk_and_metadata_answer_kept(monkeypatch):
     overview = Document(page_content="목차 ... □ 사업예산: 230,000천원 이내",
                         metadata={"chunk_id": "a.hwp#0", "chunk_index": 0})
     monkeypatch.setattr(summarize, "retrieve", lambda q, c, filters=None: [
@@ -77,18 +78,20 @@ def test_budget_keyword_chunk_and_metadata_fallback(monkeypatch):
     monkeypatch.setattr(summarize, "_keyword_chunks",
                         lambda field, doc_id, config: [overview] if field == "예산" else [])
 
-    class NeverFinds(FakeLLM):
+    class AnswersFromList(FakeLLM):
         def batch(self, inputs, config=None):
             self.prompts.extend(inputs)
-            return [AIMessage(content="문서에 명시 없음") for _ in inputs]
+            return [AIMessage(content="문서에 명시 없음 (공고 목록상 사업 금액: 230,000,000원)"
+                              if "공고 목록 정보" in m[-1].content else "문서에 명시 없음 (일반적으로 1년)")
+                    for m in inputs]
 
-    llm = NeverFinds()
+    llm = AnswersFromList()
     text = summarize._summarize("서민금융 채팅 상담시스템", CONFIG, llm=llm)
     budget_prompt = llm.prompts[0][-1].content
     assert budget_prompt.index("a.hwp#0") < budget_prompt.index("a.hwp#60")  # 키워드 청크가 먼저
-    assert "- **예산**: 230,000,000원 (공고 정보 기준)" in text  # LLM 이 놓쳐도 메타데이터로
-    assert "- **하자보수**: 문서에 명시 없음" in text  # 메타데이터 없는 항목은 그대로
-
+    # 공고 목록 값을 붙인 답은 그대로 두고, "명시 없음" 뒤 다른 설명은 버림
+    assert "- **예산**: 문서에 명시 없음 (공고 목록상 사업 금액: 230,000,000원)" in text
+    assert "- **하자보수**: 문서에 명시 없음\n" in text
 
 def test_ambiguous_name_asks_back(monkeypatch):
     monkeypatch.setattr(summarize, "load_catalog", lambda config: CATALOG)

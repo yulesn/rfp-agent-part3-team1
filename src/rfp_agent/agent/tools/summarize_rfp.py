@@ -1,13 +1,13 @@
 """[LLM·에이전트] RFP 핵심 요약 도구 (1차 목표)
 
 - 공고 1건을 11개 고정 항목(11/17·11/19 회의 결정)으로 요약합니다.
-- 흐름: 공고 찾기(메타데이터) → 항목별로 그 문서 청크만 검색(의미 검색 + 일부 항목은 키워드)
-  → 항목별 LLM 추출(병렬) → 예산·마감이 비면 공고 정보로 채움 → 합치기
+- 흐름: 공고 찾기(메타데이터) → 항목별로 그 문서 청크만 검색(의미 검색, 예산은 키워드 청크도)
+  → 항목별 LLM 추출(병렬) → 합치기
+- 예산·마감은 공고 목록 값도 프롬프트에 주고, 문서에 없을 때만 "문서에 명시 없음 (공고 목록상 …)"으로 쓰게 합니다.
 - 문서에 근거가 없는 항목은 반드시 "문서에 명시 없음"으로 씁니다 (평가셋 must_not 확인 대상).
 - 항목별 검색어·프롬프트를 바꾸면 노션 「실험 로그」에 결과를 남겨 주세요.
 """
 
-import difflib
 import unicodedata
 
 from langchain_core.documents import Document
@@ -59,23 +59,14 @@ SUMMARY_FIELDS: dict[str, tuple[str, str]] = {
 }
 # 메타데이터(제공받은 CSV)에서 바로 가져오는 항목. 키 이름은 팀 청크 메타데이터 기준
 METADATA_FIELDS = {"발주기관": ("발주 기관", "발주기관"), "사업명": ("사업명",)}
-# 본문 검색과 함께 LLM 에 보여 줄 공고 메타데이터(제공받은 CSV). 본문에서 놓쳐도 근거가 됩니다.
-METADATA_HINTS = {
-    "예산": ("사업 금액",),
-    "제출 마감": ("입찰 참여 마감일",),
-    "주요 요구사항": ("사업 요약",),
-}
+# 공고 목록(메타데이터) 값을 프롬프트에 함께 주는 항목: 항목 → (메타데이터 키, 표시 이름)
+# 문서에 값이 없을 때만 "문서에 명시 없음 (공고 목록상 입찰 마감: …)" 형식으로 쓰게 합니다 (SUMMARY_FIELD_PROMPT).
+METADATA_IN_PROMPT = {"예산": ("사업 금액", "사업 금액"), "제출 마감": ("입찰 참여 마감일", "입찰 마감")}
 # 의미 검색만으로는 잘 안 잡히는 항목은 키워드가 들어간 청크도 함께 넣습니다.
 # 예) 예산은 문서 앞 "사업 개요" 청크(목차와 섞여 있음)에 있는데, "사업예산"이란 말이
 #     평가·입찰 조건 청크에 더 자주 나와서 의미 검색 top-k 를 그쪽이 차지합니다.
-KEYWORD_FIELDS = {
-    "예산": ("사업예산", "사업 예산", "사업금액", "사업 금액", "추정가격", "사업비"),
-    "사업기간": ("사업기간", "사업 기간", "과업기간", "계약기간"),
-    "계약방법": ("계약방법", "계약 방법", "입찰방법", "입찰방식"),
-}
+KEYWORD_FIELDS = {"예산": ("사업예산", "사업 예산", "사업금액", "사업 금액", "추정가격", "사업비")}
 KEYWORD_CHUNKS = 2
-# LLM 이 "명시 없음"이라고 해도 공고 정보(메타데이터)에 값이 있으면 그 값으로 채우는 항목
-METADATA_FALLBACK = {"예산": "사업 금액", "제출 마감": "입찰 참여 마감일"}
 CHUNKS_PER_FIELD = 3
 
 _catalog_cache: dict[tuple, list[dict]] = {}
@@ -128,14 +119,7 @@ def find_rfp(name: str, catalog: list[dict]) -> list[dict]:
     words = [w for w in (_compact(w) for w in name.split()) if len(w) >= 2] or [query]
     scores = [sum(w in label(r) for w in words) / len(words) for r in catalog]
     best = max(scores, default=0)
-    if best >= 0.6:
-        return [r for r, s in zip(catalog, scores) if s == best]
-    # 3) 오타 대비: 글자 유사도가 높은 공고를 후보로
-    ranked = sorted(
-        ((difflib.SequenceMatcher(None, query, label(r)).ratio(), i) for i, r in enumerate(catalog)),
-        reverse=True,
-    )
-    return [catalog[i] for score, i in ranked[:5] if score >= 0.5]
+    return [r for r, s in zip(catalog, scores) if s == best] if best >= 0.6 else []
 
 
 def _format_chunks(docs: list[Document]) -> str:
@@ -143,14 +127,14 @@ def _format_chunks(docs: list[Document]) -> str:
 
 
 def _metadata_hint(field: str, record: dict) -> str:
-    lines = []
-    for key in METADATA_HINTS.get(field, ()):
-        value = record.get(key)
-        if isinstance(value, int):
-            value = f"{value:,}원"
-        if value not in (None, ""):
-            lines.append(f"{key}: {value}")
-    return "[공고 정보]\n" + "\n".join(lines) + "\n\n" if lines else ""
+    """예산·마감의 공고 목록 값을 "[공고 목록 정보]" 블록으로 만듭니다. 값이 없으면 빈 문자열."""
+    key, label = METADATA_IN_PROMPT.get(field, ("", ""))
+    value = record.get(key) if key else None
+    if isinstance(value, int) and value > 0:
+        value = f"{value:,}원"
+    elif not (isinstance(value, str) and value.strip()):
+        return ""
+    return f"[공고 목록 정보]\n공고 목록상 {label}: {str(value).strip()}\n\n"
 
 
 def _keyword_chunks(field: str, doc_id: str, config: dict) -> list[Document]:
@@ -175,15 +159,6 @@ def _merge(*groups: list[Document]) -> list[Document]:
         for doc in docs:
             merged.setdefault(doc.metadata.get("chunk_id") or id(doc), doc)
     return list(merged.values())
-
-
-def _fallback(field: str, record: dict) -> str | None:
-    value = record.get(METADATA_FALLBACK.get(field, ""))
-    if isinstance(value, int) and value > 0:
-        return f"{value:,}원 (공고 정보 기준)"
-    if isinstance(value, str) and value.strip():
-        return f"{value.strip()} (공고 정보 기준)"
-    return None
 
 
 def _extract_fields(doc_id: str, record: dict, config: dict, llm) -> dict[str, str]:
@@ -212,10 +187,9 @@ def _extract_fields(doc_id: str, record: dict, config: dict, llm) -> dict[str, s
     answers = llm.batch([m for _, m in pending], config={"max_concurrency": 4})
     for (field, _), answer in zip(pending, answers):
         text = (answer.content or "").strip()
-        results[field] = NOT_FOUND if not text or NOT_FOUND in text else text
-    for field, value in results.items():
-        if value == NOT_FOUND:
-            results[field] = _fallback(field, record) or NOT_FOUND
+        if not text or (NOT_FOUND in text and "공고 목록상" not in text):
+            text = NOT_FOUND  # "명시 없음" 뒤에 붙은 설명은 버림
+        results[field] = text
     return {field: results[field] for field in SUMMARY_FIELDS}
 
 
