@@ -7,11 +7,14 @@
 
 import re
 import unicodedata
+from collections import OrderedDict
+from threading import Lock
 
 from chromadb.api.types import validate_where
+from langchain_chroma import Chroma
 from langchain_core.documents import Document
 
-from rfp_agent.retrieval.vectorstore import load_vectorstore
+from rfp_agent.retrieval.vectorstore import IndexIdentity, load_vectorstore_with_identity
 
 
 _DETAIL_TERMS = (
@@ -24,6 +27,10 @@ _BROAD_TERMS = (
     "나열", "들중", "모든공고", "관련공고", "다른사업",
 )
 _AGENCY_SUFFIX = r"의|은|는|이|가|을|를|에서|에게|과|와|도|만|으로|로"
+_CATALOG_LIMIT = 8
+NoticeCatalog = tuple[tuple[tuple[str, str, str], ...], frozenset[str]]
+_catalogs: OrderedDict[IndexIdentity, NoticeCatalog] = OrderedDict()
+_catalog_lock = Lock()
 
 
 def _compact(text: str) -> str:
@@ -36,12 +43,7 @@ def _named_agency(agency: str, query: str) -> bool:
     return bool(re.search(rf"(?<!\w){name}(?=$|\W|(?:{_AGENCY_SUFFIX})(?!\w))", query))
 
 
-def _title_filter(query: str, store) -> dict[str, str] | None:
-    compact_query = _compact(query)
-    if not any(term in compact_query for term in _DETAIL_TERMS):
-        return None
-
-    # 기존 DB 메타데이터만 읽는다. 검색용 벡터나 청크 본문을 다시 불러오지 않는다.
+def _build_catalog(store: Chroma) -> NoticeCatalog:
     metadata = store.get(include=["metadatas"])["metadatas"] or []
     notices = set()
     agencies = set()
@@ -56,9 +58,32 @@ def _title_filter(query: str, store) -> dict[str, str] | None:
         title, doc_id = record.get("사업명"), record.get("doc_id")
         if isinstance(title, str) and isinstance(doc_id, str) and doc_id:
             notices.add((title, doc_id, agency))
+    titles = tuple(
+        (title, doc_id, agency)
+        for raw_title, doc_id, agency in notices
+        if len(title := _compact(raw_title)) >= 10
+    )
+    return titles, frozenset(agencies)
 
-    matches = [(title, doc_id, agency) for raw_title, doc_id, agency in notices
-               if len(title := _compact(raw_title)) >= 10 and title in compact_query]
+
+def _notice_catalog(store: Chroma, identity: IndexIdentity) -> NoticeCatalog:
+    # 완성된 인덱스는 그대로 사용한다. 재구축한 컬렉션은 새 ID를 가지므로 새 목록을 읽는다.
+    with _catalog_lock:
+        if identity not in _catalogs:
+            _catalogs[identity] = _build_catalog(store)
+            if len(_catalogs) > _CATALOG_LIMIT:
+                _catalogs.popitem(last=False)
+        _catalogs.move_to_end(identity)
+        return _catalogs[identity]
+
+
+def _title_filter(query: str, store: Chroma, identity: IndexIdentity) -> dict[str, str] | None:
+    compact_query = _compact(query)
+    if not any(term in compact_query for term in _DETAIL_TERMS):
+        return None
+
+    notices, agencies = _notice_catalog(store, identity)
+    matches = [notice for notice in notices if notice[0] in compact_query]
     if len(matches) != 1:
         return None
 
@@ -93,7 +118,7 @@ def retrieve(query: str, config: dict, filters: dict | None = None) -> list[Docu
         filters = None
     if filters is not None:
         validate_where(filters)
-    vs = load_vectorstore(config)
+    vs, identity = load_vectorstore_with_identity(config)
     if not explicit_filters and config["retrieval"].get("scope_by_title", True):
-        filters = _title_filter(query, vs)
+        filters = _title_filter(query, vs, identity)
     return vs.similarity_search(query.strip(), k=top_k, filter=filters)
