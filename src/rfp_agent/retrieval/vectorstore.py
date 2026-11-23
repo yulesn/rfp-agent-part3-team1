@@ -5,6 +5,7 @@
 """
 
 from pathlib import Path
+from uuid import UUID
 
 import chromadb
 from chromadb.config import Settings
@@ -15,6 +16,8 @@ from langchain_core.documents import Document
 from rfp_agent.config import PROJECT_ROOT
 from rfp_agent.retrieval.embeddings import get_embeddings
 from rfp_agent.retrieval.index_io import normalize_metadata
+
+IndexIdentity = tuple[Path, UUID]
 
 
 def _location(config: dict) -> tuple[Path, str]:
@@ -83,6 +86,11 @@ def build_vectorstore(chunks: list[Document], config: dict) -> Chroma:
 
 
 def load_vectorstore(config: dict) -> Chroma:
+    store, _ = load_vectorstore_with_identity(config)
+    return store
+
+
+def load_vectorstore_with_identity(config: dict) -> tuple[Chroma, IndexIdentity]:
     """완성된 인덱스만 엽니다. DB 부재를 빈 검색 결과로 처리하지 않습니다."""
     path, name = _location(config)
     if not (path / "chroma.sqlite3").is_file():
@@ -97,9 +105,10 @@ def load_vectorstore(config: dict) -> Chroma:
         raise ValueError("완료 표시가 없는 인덱스입니다. 새 경로에 인덱스를 생성하세요.")
     if any(metadata.get(key) != value for key, value in _embedding_metadata(config).items()):
         raise ValueError("인덱스와 임베딩 모델 설정이 다릅니다. 같은 설정으로 검색하세요.")
-    return Chroma(
+    store = Chroma(
         client=client,
         collection_name=name,
         embedding_function=get_embeddings(config),
         create_collection_if_not_exists=False,
     )
+    return store, (path, collection.id)
