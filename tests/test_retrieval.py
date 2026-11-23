@@ -79,6 +79,34 @@ def test_persistent_search_and_filters(config, chunks, monkeypatch, tmp_path):
     assert len(retrieve("학사", config, {})) == 2
 
 
+def test_title_catalog_reused_until_collection_is_recreated(config, chunks, monkeypatch):
+    title = "2024년 공공 교육 플랫폼 구축 용역"
+    query = f"{title}의 산학 예산은?"
+    config["retrieval"]["top_k"] = 1
+    chunks[0].metadata["사업명"] = title
+    vectorstore.build_vectorstore(chunks, config)
+
+    metadata_reads = []
+    original_get = vectorstore.Chroma.get
+
+    def track_get(store, *args, **kwargs):
+        metadata_reads.append(kwargs["include"])
+        return original_get(store, *args, **kwargs)
+
+    monkeypatch.setattr(vectorstore.Chroma, "get", track_get)
+    assert retrieve(query, config)[0].metadata["doc_id"] == "a.hwp"
+    assert retrieve(query, config)[0].metadata["doc_id"] == "a.hwp"
+    assert metadata_reads == [["metadatas"]]
+
+    path, name = vectorstore._location(config)
+    vectorstore._client(path).delete_collection(name)
+    chunks[0].metadata.pop("사업명")
+    chunks[1].metadata["사업명"] = title
+    vectorstore.build_vectorstore(chunks, config)
+    assert retrieve(query, config)[0].metadata["doc_id"] == "b.pdf"
+    assert metadata_reads == [["metadatas"], ["metadatas"]]
+
+
 def test_upstream_metadata_survives_storage_and_retrieval(config, chunks):
     for chunk in chunks:
         old_id = chunk.metadata.pop("chunk_id")
