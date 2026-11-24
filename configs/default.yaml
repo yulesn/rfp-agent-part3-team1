@@ -25,6 +25,8 @@ retrieval:
   top_k: 5
 
 llm:
-  provider: openai               # openai | ollama (configs/ollama.yaml 참고)
-  model: gpt-4o-mini
+  provider: ollama               # GCP VM Ollama 서버 (SSH 터널 필요)
+  model: gemma4:12b
+  base_url: http://localhost:11434
+  num_ctx: 8192
   temperature: 0
