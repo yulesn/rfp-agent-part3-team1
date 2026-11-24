@@ -13,22 +13,30 @@ from rfp_agent.agent.nodes import make_call_model
 from rfp_agent.agent.state import AgentState
 from rfp_agent.agent.tools import ALL_TOOLS
 from rfp_agent.agent.tools.search_rfp import make_search_rfp, search_rfp
+from rfp_agent.agent.tools.summarize_rfp import make_summarize_rfp, summarize_rfp
+from rfp_agent.agent.trace import LLMCallRecorder
 from rfp_agent.llm import get_llm
 
 
 def build_graph(config: dict, *, tools=None):
     """기본 도구 목록을 사용하며 연결 시험에서는 tools로 준비된 도구만 지정합니다."""
     selected = ALL_TOOLS if tools is None else tools
-    # LLM과 검색 도구가 서로 다른 설정 파일을 읽지 않도록 같은 config를 전달합니다.
-    configured = [make_search_rfp(config) if item is search_rfp else item for item in selected]
+    # LLM과 도구가 서로 다른 설정 파일을 읽지 않도록 같은 config를 전달합니다.
+    factories = [(search_rfp, make_search_rfp), (summarize_rfp, make_summarize_rfp)]
+    configured = [
+        next((make(config) for base, make in factories if item is base), item) for item in selected
+    ]
     llm_with_tools = get_llm(config).bind_tools(configured)
 
     graph = StateGraph(AgentState)
-    graph.add_node("agent", make_call_model(llm_with_tools))
+    # 개발용: 모든 LLM 호출(도구 안의 호출 포함)을 기록해 최종 답변 끝에 붙입니다.
+    recorder = LLMCallRecorder() if config.get("agent", {}).get("show_trace", False) else None
+    graph.add_node("agent", make_call_model(llm_with_tools, recorder=recorder))
     graph.add_node("tools", ToolNode(configured))
 
     graph.add_edge(START, "agent")
     graph.add_conditional_edges("agent", tools_condition)  # 도구 호출이 있으면 tools, 없으면 END
     graph.add_edge("tools", "agent")
 
-    return graph.compile()
+    compiled = graph.compile()
+    return compiled.with_config(callbacks=[recorder]) if recorder else compiled
