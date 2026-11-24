@@ -26,6 +26,8 @@ def get_llm(config: dict) -> BaseChatModel:
             model=llm_cfg["model"],
             temperature=llm_cfg.get("temperature", 0),
             num_ctx=llm_cfg.get("num_ctx", 8192),  # Ollama 기본값(4096)은 RFP 청크를 넣기에 작음
+            # gemma4 는 기본으로 생각(thinking) 토큰을 먼저 만들어서 느리고, 컨텍스트를 다 쓰면 답이 비어 버림
+            reasoning=llm_cfg.get("reasoning"),
         )
 
     raise ValueError(f"지원하지 않는 llm provider: {llm_cfg['provider']}")

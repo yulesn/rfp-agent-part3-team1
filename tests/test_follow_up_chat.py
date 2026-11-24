@@ -139,3 +139,41 @@ def test_without_checkpointer_single_question_still_works(monkeypatch):
     monkeypatch.setattr(graph, "get_llm", lambda _: ScriptedLLM([{"query": "예산"}]))
     result = graph.build_graph(CONFIG, tools=[search_rfp]).invoke({"messages": [("user", "예산")]})
     assert result["messages"][-1].content.startswith("답변:")
+
+
+def test_follow_up_after_summary_searches_that_doc(monkeypatch):
+    summarize = import_module("rfp_agent.agent.tools.summarize_rfp")
+    monkeypatch.setattr(summarize, "_summarize_doc",
+                        lambda name, config, llm=None: ("### 📄 서민금융 요약", "a.hwp"))
+    calls = []
+    monkeypatch.setattr(search_module, "retrieve",
+                        lambda q, c, filters=None: calls.append(filters) or [_doc("a.hwp")])
+
+    class LLM(ScriptedLLM):
+        def invoke(self, messages):
+            self.inputs.append(messages)
+            if isinstance(messages[-1], ToolMessage):
+                return AIMessage(content="답변")
+            name, args = self.plans.pop(0)
+            return AIMessage(content="", tool_calls=[{"name": name, "args": args, "id": "x"}])
+
+    llm = LLM([("summarize_rfp", {"rfp_name": "서민금융"}), ("search_rfp", {"query": "하자보수"})])
+    monkeypatch.setattr(graph, "get_llm", lambda _: llm)
+    agent = graph.build_graph(CONFIG, tools=[search_rfp, summarize.summarize_rfp],
+                              checkpointer=graph.new_memory())
+    thread = {"configurable": {"thread_id": "s"}}
+    assert agent.invoke({"messages": [("user", "서민금융 요약해줘")]}, thread)["current_doc_id"] == "a.hwp"
+    agent.invoke({"messages": [("user", "하자보수 기간 자세히")]}, thread)
+    assert calls == [{"doc_id": "a.hwp"}]  # 요약한 공고 안에서 후속 검색
+
+
+def test_trace_is_attached_but_not_fed_back(monkeypatch):
+    agent, llm, _ = _setup(monkeypatch, plans=[{"query": "예산"}, None], results=[[_doc("a.hwp")]])
+    agent = graph.build_graph({**CONFIG, "agent": {"show_trace": True}}, tools=[search_rfp],
+                              checkpointer=graph.new_memory())
+    thread = {"configurable": {"thread_id": "t"}}
+    first = agent.invoke({"messages": [("user", "예산은?")]}, thread)
+    assert "실행 과정" in first["messages"][-1].content
+    agent.invoke({"messages": [("user", "다시")]}, thread)
+    previous_answer = llm.inputs[-1][2]
+    assert previous_answer.content.startswith("답변:") and "실행 과정" not in previous_answer.content

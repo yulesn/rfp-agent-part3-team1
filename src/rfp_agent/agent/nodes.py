@@ -7,12 +7,14 @@
     이전 질문은 최근 N턴의 "질문 + 최종 답변"만 남기고 도구 결과 원문은 뺍니다 (Ollama 8k 컨텍스트).
   - track_doc 은 도구 결과에서 공고 1건이 특정되면 current_doc_id 에 저장합니다.
 - 노드가 더 필요해지면(예: 질문 분류, 답변 검증) 여기에 추가하세요.
+- 개발용: config 의 agent.show_trace 가 true 면 최종 답변 끝에 LLM 호출 기록 전체를 붙입니다 (trace.py).
 """
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
 
 from rfp_agent.agent.prompts import CURRENT_DOC_NOTE, SYSTEM_PROMPT
 from rfp_agent.agent.state import AgentState
+from rfp_agent.agent.trace import format_calls
 
 DEFAULT_HISTORY_TURNS = 4  # 현재 질문 외에 LLM 에 보여 줄 이전 대화 턴 수 (configs 의 agent.history_turns)
 # 개발용 실행 기록(trace)이 답변 끝에 붙어 있으면 다음 턴 입력에서는 잘라 냅니다.
@@ -51,15 +53,23 @@ def history_view(messages: list[AnyMessage], max_turns: int = DEFAULT_HISTORY_TU
     return [m for t in kept for m in t] + list(current)
 
 
-def make_call_model(llm_with_tools, *, history_turns: int = DEFAULT_HISTORY_TURNS):
-    """도구가 연결된 LLM 을 받아서, 대화를 보고 답하거나 도구를 호출하는 노드를 만듭니다."""
+def make_call_model(llm_with_tools, *, history_turns: int = DEFAULT_HISTORY_TURNS, recorder=None):
+    """도구가 연결된 LLM 을 받아서, 대화를 보고 답하거나 도구를 호출하는 노드를 만듭니다.
+
+    recorder(LLMCallRecorder)가 있으면 최종 답변 끝에 이번 질문의 LLM 호출 기록 전체를 붙입니다.
+    """
 
     def call_model(state: AgentState) -> dict:
         system = SYSTEM_PROMPT
         if state.get("current_doc_id"):
             system += CURRENT_DOC_NOTE.format(doc_id=state["current_doc_id"])
         messages = [SystemMessage(system), *history_view(state["messages"], history_turns)]
-        return {"messages": [llm_with_tools.invoke(messages)]}
+        response = llm_with_tools.invoke(messages)
+        if recorder is not None and not response.tool_calls:
+            content = response.content if isinstance(response.content, str) else str(response.content)
+            response = response.model_copy(
+                update={"content": content + format_calls(recorder.snapshot())})
+        return {"messages": [response]}
 
     return call_model
 
