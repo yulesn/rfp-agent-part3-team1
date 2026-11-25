@@ -28,3 +28,7 @@ llm:
   provider: openai               # openai | ollama (configs/ollama.yaml 참고)
   model: gpt-4o-mini
   temperature: 0
+judge_llm:
+  provider: openai
+  model: gpt-5-mini
+  temperature: 0

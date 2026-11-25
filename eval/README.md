@@ -53,3 +53,6 @@ uv run python scripts/evaluate.py --config configs/ollama.yaml --limit 5 --llm-j
 OpenAI 설정 모델로 전체 평가 + LLM Judge 실행
 Bash
 uv run python scripts/evaluate.py --config configs/default.yaml --llm-judge --judge-mo
+
+# YAML(configs/ollama.yaml)에 정의된 llm과 judge_llm 설정대로 실행
+uv run python scripts/evaluate.py --config configs/ollama.yaml --limit 5 --llm-judge

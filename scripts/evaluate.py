@@ -121,19 +121,21 @@ def main() -> None:
 
     print(f"평가 시작 | 설정: {args.config} ({model_name}) | 문항 수: {len(questions)}개")
     graph = build_graph(config)
+
     judge_llm = None
     if args.llm_judge or args.judge_model:
-        judge_model_name = args.judge_model or "gpt-5-mini"
-        judge_provider = (
-            "ollama"
-            if any(k in judge_model_name.lower() for k in ("gemma", "llama", "qwen", "mistral"))
-            else "openai"
-        )
-        judge_cfg = {
-            **config,
-            "llm": {"provider": judge_provider, "model": judge_model_name, "temperature": 0.0},
-        }
-        judge_llm = get_llm(judge_cfg)
+        judge_section = dict(config.get("judge_llm") or {})
+        if args.judge_model:
+            judge_section["model"] = args.judge_model
+            judge_section["provider"] = (
+                "ollama"
+                if any(k in args.judge_model.lower() for k in ("gemma", "llama", "qwen", "mistral"))
+                else "openai"
+            )
+        if not judge_section:
+            judge_section = {"provider": "openai", "model": "gpt-5-mini", "temperature": 0}
+        judge_section.setdefault("temperature", 0)
+        judge_llm = get_llm({**config, "llm": judge_section})
 
     rows: list[dict[str, Any]] = []
     by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -170,8 +172,8 @@ def main() -> None:
         ans_res = score_answer(item, prediction)
         ans_score = ans_res["answer_score"]
 
-        judge_res: dict[str, float] | None = None
-        if judge_llm is not None:
+        judge_res: dict[str, Any] | None = None
+        if judge_llm is not None and not error_msg:
             ref_text = (
                 json.dumps(item["answer_facts"], ensure_ascii=False)
                 if q_type == "summary"
