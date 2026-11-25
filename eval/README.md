@@ -45,14 +45,7 @@ uv run python scripts/evaluate.py --config configs/ollama.yaml --limit 3
 Bash
 uv run python scripts/evaluate.py --config configs/ollama.yaml
 
-로컬 모델 답변 + 외부 API Judge 분리 채점 (권장)
-답변 생성은 무료 로컬 모델로 수행하고, 채점(--llm-judge)만 지정한 API 모델로 분리해 셀프 채점 편향을 방지합니다.
+LLM Judge 채점 포함 (채점 모델은 설정 파일의 judge_llm 섹션으로 정함)
+답변 생성은 llm, 채점은 judge_llm(예: openai gpt-5-mini)으로 분리해 셀프 채점 편향을 막습니다. 채점 모델을 바꾸려면 yaml 의 judge_llm 을 수정하세요.
 Bash
-uv run python scripts/evaluate.py --config configs/ollama.yaml --limit 5 --llm-judge
-
-OpenAI 설정 모델로 전체 평가 + LLM Judge 실행
-Bash
-uv run python scripts/evaluate.py --config configs/default.yaml --llm-judge --judge-mo
-
-# YAML(configs/ollama.yaml)에 정의된 llm과 judge_llm 설정대로 실행
 uv run python scripts/evaluate.py --config configs/ollama.yaml --limit 5 --llm-judge

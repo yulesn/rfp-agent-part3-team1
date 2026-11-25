@@ -49,7 +49,7 @@ def _content_to_str(content: Any) -> str:
     return str(content or "")
 
 
-def _load_valid_doc_ids(documents_path: str = "data/documents.jsonl") -> set[str]:
+def _load_valid_doc_ids(documents_path: str = "data/processed/documents.jsonl") -> set[str]:
     path = Path(documents_path)
     if not path.exists():
         return set()
@@ -83,6 +83,12 @@ def _extract_tool_info(messages: list[Any], valid_doc_ids: set[str]) -> tuple[li
             raw = _content_to_str(msg.content)
             contexts.append(raw[:1500])
 
+            # search_rfp 는 검색된 doc_id 목록을 artifact 로 돌려줍니다 (순위 그대로).
+            artifact = getattr(msg, "artifact", None)
+            if isinstance(artifact, dict):
+                for doc_id in artifact.get("doc_ids", []):
+                    _add(doc_id)
+
             try:
                 parsed = json.loads(raw)
                 items = parsed if isinstance(parsed, list) else parsed.get("results", [parsed])
@@ -105,7 +111,6 @@ def main() -> None:
     parser.add_argument("--questions", default="eval/questions.jsonl", help="평가셋 JSONL 경로")
     parser.add_argument("--limit", type=int, default=0, help="앞에서 N문항만 실행 (0이면 전체)")
     parser.add_argument("--llm-judge", action="store_true", help="LLM-as-a-judge 채점 활성화")
-    parser.add_argument("--judge-model", default="", help="LLM Judge 전용 모델명 (예: gpt-5-mini)")
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -122,20 +127,13 @@ def main() -> None:
     print(f"평가 시작 | 설정: {args.config} ({model_name}) | 문항 수: {len(questions)}개")
     graph = build_graph(config)
 
+    # 채점 모델은 설정 파일의 judge_llm 섹션으로만 정합니다 (provider 도 직접 적기).
     judge_llm = None
-    if args.llm_judge or args.judge_model:
-        judge_section = dict(config.get("judge_llm") or {})
-        if args.judge_model:
-            judge_section["model"] = args.judge_model
-            judge_section["provider"] = (
-                "ollama"
-                if any(k in args.judge_model.lower() for k in ("gemma", "llama", "qwen", "mistral"))
-                else "openai"
-            )
+    if args.llm_judge:
+        judge_section = config.get("judge_llm")
         if not judge_section:
-            judge_section = {"provider": "openai", "model": "gpt-5-mini", "temperature": 0}
-        judge_section.setdefault("temperature", 0)
-        judge_llm = get_llm({**config, "llm": judge_section})
+            raise SystemExit(f"--llm-judge 를 쓰려면 {args.config} 에 judge_llm 섹션(provider, model)을 넣어 주세요.")
+        judge_llm = get_llm({**config, "llm": dict(judge_section)})
 
     rows: list[dict[str, Any]] = []
     by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
