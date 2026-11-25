@@ -26,4 +26,8 @@ llm:
   model: gemma4:12b
   base_url: http://localhost:11434
   num_ctx: 8192
+  reasoning: false               # 생각 토큰 끄기 (켜면 느리고, 길면 빈 답이 나옴)
   temperature: 0
+
+agent:
+  show_trace: false              # true 면 답변 끝에 모든 LLM 호출(프롬프트·출력) 표시 (개발용)
