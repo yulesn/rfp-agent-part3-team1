@@ -47,10 +47,14 @@ def chunk_documents(
             normalized = text.strip()
 
             #의미 없는 Mardonw 표 구분선 제거
-            if re.fullmatch(r"\|(?:\s*:?-{3,}:?\s*\|)+", normalized):
+            if re.fullmatch(
+                r"^\s*\|(?:\s*:?-{3,}:?\s*\|)+\s*$",
+                normalized
+            ):
                 continue
+
             if normalized == "|":
-                continue  
+                continue
             
             metadata = {
                 **doc.metadata,
