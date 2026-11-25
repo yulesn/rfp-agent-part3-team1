@@ -6,14 +6,18 @@
 - 예산·마감은 공고 목록 값도 프롬프트에 주고, 문서에 없을 때만 "문서에 명시 없음 (공고 목록상 …)"으로 쓰게 합니다.
 - 문서에 근거가 없는 항목은 반드시 "문서에 명시 없음"으로 씁니다 (평가셋 must_not 확인 대상).
 - 그래프 안에서는 요약한 공고의 doc_id 를 artifact 로 돌려줘서, 이어지는 후속 질문이 그 공고 안에서 검색됩니다.
+- 반대로 대화 중인 공고(state 의 current_doc_id)가 있으면 "그거 요약해줘" 처럼 rfp_name 이 비었거나
+  "이 공고" 같은 지시어일 때 그 공고를 요약합니다. 사업명이 여러 공고에 걸리면 대화 중인 공고를 고릅니다.
 - 항목별 검색어·프롬프트를 바꾸면 노션 「실험 로그」에 결과를 남겨 주세요.
 """
 
 import unicodedata
+from typing import Annotated
 
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
+from langgraph.prebuilt import InjectedState
 
 from rfp_agent.agent.prompts import SUMMARY_FIELD_PROMPT
 from rfp_agent.config import load_config
@@ -68,6 +72,9 @@ METADATA_IN_PROMPT = {"예산": ("사업 금액", "사업 금액"), "제출 마�
 #     평가·입찰 조건 청크에 더 자주 나와서 의미 검색 top-k 를 그쪽이 차지합니다.
 KEYWORD_FIELDS = {"예산": ("사업예산", "사업 예산", "사업금액", "사업 금액", "추정가격", "사업비")}
 KEYWORD_CHUNKS = 2
+# rfp_name 이 이 말들(띄어쓰기 무시)이거나 비어 있으면 대화 중인 공고를 요약합니다.
+CURRENT_DOC_WORDS = {"이공고", "그공고", "해당공고", "현재공고", "위공고", "이사업", "그사업", "해당사업",
+                     "이거", "그거", "이것", "그것", "이rfp", "그rfp", "해당rfp"}
 CHUNKS_PER_FIELD = 3
 
 _catalog_cache: dict[tuple, list[dict]] = {}
@@ -209,9 +216,21 @@ def format_summary(record: dict, fields: dict[str, str]) -> str:
     return f"### 📄 {title}\n\n출처 문서: {source}\n\n{items}"
 
 
-def _summarize_doc(rfp_name: str, config: dict, llm=None) -> tuple[str, str | None]:
+def _pick_rfp(rfp_name: str, catalog: list[dict], current_doc_id: str | None) -> list[dict]:
+    """요약할 공고 후보. 지시어·빈 이름이면 대화 중인 공고, 여러 건이면 그중 대화 중인 공고를 우선합니다."""
+    current = [r for r in catalog if current_doc_id and r["doc_id"] == current_doc_id]
+    if current and _compact(rfp_name) in CURRENT_DOC_WORDS | {""}:
+        return current
+    candidates = find_rfp(rfp_name, catalog)
+    if len(candidates) > 1 and current and current[0] in candidates:
+        return current
+    return candidates
+
+
+def _summarize_doc(rfp_name: str, config: dict, llm=None,
+                   current_doc_id: str | None = None) -> tuple[str, str | None]:
     """(요약 텍스트, 요약한 공고 doc_id) 를 돌려줍니다. 공고를 1건으로 못 정하면 doc_id 는 None."""
-    candidates = find_rfp(rfp_name, load_catalog(config))
+    candidates = _pick_rfp(rfp_name, load_catalog(config), current_doc_id)
     if not candidates:
         return f"'{rfp_name}'에 해당하는 공고를 찾지 못했습니다. 사업명이나 발주기관을 더 정확히 알려 주세요.", None
     if len(candidates) > 1:
@@ -231,7 +250,8 @@ _DESCRIPTION = (
     "RFP 공고 1건을 11개 항목(발주기관, 사업명, 예산, 사업기간, 계약방법, 주요 요구사항, "
     "참가 자격, 평가, 제출 마감, 하자보수, 공동수급·하도급)으로 요약합니다. "
     "사용자가 특정 공고의 요약·개요·핵심 정리를 원할 때 사용하세요. "
-    "rfp_name 에는 사업명이나 발주기관 이름(일부도 가능)을 넣으세요."
+    "rfp_name 에는 사업명이나 발주기관 이름(일부도 가능)을 넣으세요. "
+    "대화 중인 공고를 요약할 때는 rfp_name 을 비워 두세요."
 )
 
 
@@ -244,8 +264,12 @@ def make_summarize_rfp(config: dict):
     """에이전트가 쓰는 DB·LLM 설정을 요약 도구에도 전달합니다."""
 
     @tool("summarize_rfp", description=_DESCRIPTION, response_format="content_and_artifact")
-    def configured_summarize(rfp_name: str) -> tuple[str, dict]:
-        text, doc_id = _summarize_doc(rfp_name, config)
+    def configured_summarize(
+        rfp_name: str = "",
+        state: Annotated[dict | None, InjectedState] = None,
+    ) -> tuple[str, dict]:
+        current_doc_id = (state or {}).get("current_doc_id")
+        text, doc_id = _summarize_doc(rfp_name, config, current_doc_id=current_doc_id)
         return text, {"doc_ids": [doc_id] if doc_id else []}  # track_doc 이 current_doc_id 로 저장
 
     return configured_summarize

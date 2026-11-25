@@ -37,7 +37,7 @@ def _format(docs) -> str:
 
 @tool
 def search_rfp(query: str) -> str:
-    """RFP 문서에서 질문과 관련된 내용을 검색합니다. 요구사항, 사업 내용, 제출 서류 등 문서 본문에 대한 질문에 사용하세요."""
+    """RFP 문서 본문에서 질문과 관련된 내용을 검색합니다. 요구사항, 사업 내용, 제출 서류 등 문서 본문에 대한 질문에 사용하세요. 조건으로 공고 목록을 찾을 때는 filter_rfp_by_metadata 를 쓰세요."""
     return _search(query, load_config())
 
 
@@ -45,7 +45,8 @@ def make_search_rfp(config: dict):
     """에이전트가 선택한 DB·임베딩·top_k 설정을 검색 도구에도 전달합니다."""
 
     @tool("search_rfp", response_format="content_and_artifact", description=(
-        "RFP 본문에서 요구사항, 사업 내용, 예산, 기간, 제출 서류의 근거와 출처를 검색합니다. "
+        "RFP 문서 본문에서 요구사항, 사업 내용, 평가 방법, 제출 서류 같은 내용의 근거와 출처를 검색합니다. "
+        "발주기관·사업 금액·마감일 조건으로 공고 목록을 찾거나 세는 질문에는 쓰지 말고 filter_rfp_by_metadata 를 쓰세요. "
         "대화 중인 공고가 있으면 그 공고 안에서만 검색합니다. "
         "다른 공고나 여러 공고를 찾을 때만 search_all=true 로 전체 공고에서 검색하세요."))
     def configured_search(
