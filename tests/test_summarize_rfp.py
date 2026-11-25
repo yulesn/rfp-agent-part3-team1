@@ -102,7 +102,8 @@ def test_ambiguous_name_asks_back(monkeypatch):
 def test_graph_passes_config_to_summarize(monkeypatch):
     graph = import_module("rfp_agent.agent.graph")
     seen = []
-    monkeypatch.setattr(summarize, "_summarize", lambda name, config, llm=None: seen.append(config) or "ok")
+    monkeypatch.setattr(summarize, "_summarize_doc",
+                        lambda name, config, llm=None: (seen.append(config) or "ok", None))
 
     class TestLLM:
         def bind_tools(self, tools):

@@ -5,6 +5,7 @@
   → 항목별 LLM 추출(병렬) → 합치기
 - 예산·마감은 공고 목록 값도 프롬프트에 주고, 문서에 없을 때만 "문서에 명시 없음 (공고 목록상 …)"으로 쓰게 합니다.
 - 문서에 근거가 없는 항목은 반드시 "문서에 명시 없음"으로 씁니다 (평가셋 must_not 확인 대상).
+- 그래프 안에서는 요약한 공고의 doc_id 를 artifact 로 돌려줘서, 이어지는 후속 질문이 그 공고 안에서 검색됩니다.
 - 항목별 검색어·프롬프트를 바꾸면 노션 「실험 로그」에 결과를 남겨 주세요.
 """
 
@@ -208,17 +209,22 @@ def format_summary(record: dict, fields: dict[str, str]) -> str:
     return f"### 📄 {title}\n\n출처 문서: {source}\n\n{items}"
 
 
-def _summarize(rfp_name: str, config: dict, llm=None) -> str:
+def _summarize_doc(rfp_name: str, config: dict, llm=None) -> tuple[str, str | None]:
+    """(요약 텍스트, 요약한 공고 doc_id) 를 돌려줍니다. 공고를 1건으로 못 정하면 doc_id 는 None."""
     candidates = find_rfp(rfp_name, load_catalog(config))
     if not candidates:
-        return f"'{rfp_name}'에 해당하는 공고를 찾지 못했습니다. 사업명이나 발주기관을 더 정확히 알려 주세요."
+        return f"'{rfp_name}'에 해당하는 공고를 찾지 못했습니다. 사업명이나 발주기관을 더 정확히 알려 주세요.", None
     if len(candidates) > 1:
         names = "\n".join(f"- {_first(r, METADATA_FIELDS['사업명']) or r['doc_id']}"
                           for r in candidates[:5])
-        return f"'{rfp_name}'에 해당하는 공고가 여러 건입니다. 어떤 공고인지 사용자에게 확인하세요.\n{names}"
+        return f"'{rfp_name}'에 해당하는 공고가 여러 건입니다. 어떤 공고인지 사용자에게 확인하세요.\n{names}", None
     record = candidates[0]
     fields = _extract_fields(record["doc_id"], record, config, llm or get_llm(config))
-    return format_summary(record, fields)
+    return format_summary(record, fields), record["doc_id"]
+
+
+def _summarize(rfp_name: str, config: dict, llm=None) -> str:
+    return _summarize_doc(rfp_name, config, llm)[0]
 
 
 _DESCRIPTION = (
@@ -237,8 +243,9 @@ def summarize_rfp(rfp_name: str) -> str:
 def make_summarize_rfp(config: dict):
     """에이전트가 쓰는 DB·LLM 설정을 요약 도구에도 전달합니다."""
 
-    @tool("summarize_rfp", description=_DESCRIPTION)
-    def configured_summarize(rfp_name: str) -> str:
-        return _summarize(rfp_name, config)
+    @tool("summarize_rfp", description=_DESCRIPTION, response_format="content_and_artifact")
+    def configured_summarize(rfp_name: str) -> tuple[str, dict]:
+        text, doc_id = _summarize_doc(rfp_name, config)
+        return text, {"doc_ids": [doc_id] if doc_id else []}  # track_doc 이 current_doc_id 로 저장
 
     return configured_summarize
