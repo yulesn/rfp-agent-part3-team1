@@ -105,6 +105,7 @@ def main() -> None:
     parser.add_argument("--questions", default="eval/questions.jsonl", help="평가셋 JSONL 경로")
     parser.add_argument("--limit", type=int, default=0, help="앞에서 N문항만 실행 (0이면 전체)")
     parser.add_argument("--llm-judge", action="store_true", help="LLM-as-a-judge 채점 활성화")
+    parser.add_argument("--judge-model", default="", help="LLM Judge 전용 모델명 (예: gpt-5-mini)")
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -120,7 +121,19 @@ def main() -> None:
 
     print(f"평가 시작 | 설정: {args.config} ({model_name}) | 문항 수: {len(questions)}개")
     graph = build_graph(config)
-    judge_llm = get_llm(config) if args.llm_judge else None
+    judge_llm = None
+    if args.llm_judge or args.judge_model:
+        judge_model_name = args.judge_model or "gpt-5-mini"
+        judge_provider = (
+            "ollama"
+            if any(k in judge_model_name.lower() for k in ("gemma", "llama", "qwen", "mistral"))
+            else "openai"
+        )
+        judge_cfg = {
+            **config,
+            "llm": {"provider": judge_provider, "model": judge_model_name, "temperature": 0.0},
+        }
+        judge_llm = get_llm(judge_cfg)
 
     rows: list[dict[str, Any]] = []
     by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -176,6 +189,7 @@ def main() -> None:
             "mrr": "" if mrr_score is None else mrr_score,
             "recall_at_k": "" if r_score is None else r_score,
             "answer_score": ans_score,
+            "judge_reason": "" if judge_res is None else judge_res.get("reason", ""),
             "judge_accuracy": "" if judge_res is None else judge_res["accuracy"],
             "judge_faithfulness": "" if judge_res is None else judge_res["faithfulness"],
             "judge_score": "" if judge_res is None else judge_res["score"],

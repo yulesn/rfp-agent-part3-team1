@@ -171,31 +171,33 @@ def score_answer(item: dict[str, Any], answer: str) -> dict[str, Any]:
         "detail": f"유형={q_type}",
     }
 
-
 def llm_judge(
     question: str,
     answer: str,
     reference: str,
     context: str = "",
     llm: Any = None,
-) -> dict[str, float]:
-    """LLM-as-a-judge 채점: 정확성(accuracy)과 근거 충실도(faithfulness)를 0.0~1.0으로 평가합니다."""
+) -> dict[str, Any]:
+    """LLM-as-a-judge 채점: reason을 먼저 작성한 뒤 accuracy와 faithfulness를 0.0~1.0으로 평가합니다."""
     if llm is None:
         from rfp_agent.config import load_config
         from rfp_agent.llm import get_llm
 
         llm = get_llm(load_config())
 
-    context_block = f"\n[검색된 근거 문서]\n{context}\n" if context else ""
+    context_block = context if context.strip() else "(검색된 근거 없음)"
     prompt = (
-        "당신은 공공 입찰공고 RAG 시스템의 답변 채점관입니다.\n"
-        "아래 기준에 따라 모델 답변을 0.0에서 1.0 사이 점수로 평가하고 반드시 JSON 한 줄로만 답하세요.\n"
-        "- accuracy (정확성): 정답(Reference)의 핵심 사실·금액·날짜·조건이 빠짐없이 정확히 일치하는가\n"
-        "- faithfulness (근거 충실도): 정답/근거에 없는 내용을 임의로 지어내지(환각) 않았는가\n"
-        '출력 형식 예시: {"accuracy": 0.9, "faithfulness": 1.0}\n\n'
+        "당신은 공공 입찰공고 RAG 시스템의 엄격한 답변 채점관입니다.\n"
+        "아래 규칙에 따라 모델 답변을 평가하고, 반드시 JSON 한 줄로만 출력하세요.\n\n"
+        "[채점 규칙]\n"
+        "1. reason: 채점 근거를 한국어 한 줄로 먼저 작성하세요.\n"
+        "2. accuracy (정확성, 0.0~1.0): 오직 [질문]과 [정답(Reference)]만 비교하세요. [검색된 근거 문서]는 절대 참고하지 마세요.\n"
+        "   - 정답에 구체적인 사실·수치·명칭이 있는데 모델이 '문서에 명시 없음', '확인할 수 없음' 등으로 답하거나 핵심 사실을 누락·왜곡하면 accuracy는 반드시 0.0입니다.\n"
+        "3. faithfulness (근거 충실도, 0.0~1.0): 오직 [검색된 근거 문서]만 기준으로, 모델 답변이 근거에 없는 내용을 임의로 지어내지(환각) 않았는지 평가하세요.\n\n"
+        '출력 형식 예시: {"reason": "정답은 KCMVP이나 모델이 문서에 명시 없음이라고 오답을 냄", "accuracy": 0.0, "faithfulness": 1.0}\n\n'
         f"[질문] {question}\n"
-        f"[정답] {reference}\n"
-        f"{context_block}"
+        f"[정답(Reference)] {reference}\n"
+        f"[검색된 근거 문서]\n{context_block}\n"
         f"[모델 답변] {answer}"
     )
     try:
@@ -204,14 +206,14 @@ def llm_judge(
         match = re.search(r"\{.*?\}", text, re.S)
         if match:
             data = json.loads(match.group(0))
+            reason = str(data.get("reason", "")).strip()
             acc = round(max(0.0, min(1.0, float(data.get("accuracy", 0.0)))), 4)
             faith = round(max(0.0, min(1.0, float(data.get("faithfulness", acc)))), 4)
             avg = round((acc + faith) / 2, 4)
-            return {"accuracy": acc, "faithfulness": faith, "score": avg}
-    except Exception:
-        pass
-    return {"accuracy": 0.0, "faithfulness": 0.0, "score": 0.0}
-
+            return {"reason": reason, "accuracy": acc, "faithfulness": faith, "score": avg}
+    except Exception as exc:
+        return {"reason": f"채점 파싱 오류: {exc}", "accuracy": 0.0, "faithfulness": 0.0, "score": 0.0}
+    return {"reason": "JSON 응답 형식 오류", "accuracy": 0.0, "faithfulness": 0.0, "score": 0.0}
 
 def estimate_token_cost(prompt_tokens: int, completion_tokens: int, model: str = "gpt-4o-mini") -> float:
     """모델별 1M 토큰 단가 기준 예상 API 비용(USD)을 계산합니다 (로컬 Ollama/Gemma는 0.0)."""
