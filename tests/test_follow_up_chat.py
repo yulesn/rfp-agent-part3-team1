@@ -2,9 +2,11 @@
 이전 턴의 도구 결과 원문·오래된 턴 제외를 API 없이 확인합니다."""
 
 from importlib import import_module
+from pathlib import Path
 
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from streamlit.testing.v1 import AppTest
 
 from rfp_agent.agent import graph
 from rfp_agent.agent.nodes import TRACE_MARKER, history_view, track_doc
@@ -74,6 +76,40 @@ def test_follow_up_searches_inside_current_doc(monkeypatch):
     third = agent.invoke({"messages": [("user", "다른 ERP 공고도 있어?")]}, thread)
     assert calls[-1] is None  # search_all=true 면 전체 검색
     assert third["current_doc_id"] is None  # 여러 공고 결과 → 특정 공고 대화 끝
+
+
+def test_streamlit_displays_evidence_for_each_turn(monkeypatch):
+    first_chunk = _doc("a.pdf", "예산 근거")
+    follow_up_chunk = Document(
+        page_content="참가 자격 근거",
+        metadata={"doc_id": "a.pdf", "chunk_id": "a.pdf#2", "page_num": 7},
+    )
+    agent, _, calls = _setup(
+        monkeypatch,
+        plans=[{"query": "예산"}, {"query": "참가 자격"}, None],
+        results=[[first_chunk, first_chunk], [follow_up_chunk]],
+    )
+    monkeypatch.setattr(graph, "build_graph", lambda *args, **kwargs: agent)
+    monkeypatch.setattr("rfp_agent.config.load_config", lambda: CONFIG)
+
+    path = Path(__file__).resolve().parents[1] / "app" / "streamlit_app.py"
+    app = AppTest.from_file(str(path)).run()
+    app.chat_input[0].set_value("공고의 예산은?").run()
+    assert not app.exception
+    assert app.expander[0].label == "검색된 원문 근거 보기 (1개)"
+    assert app.expander[0].get("text")[0].value == "예산 근거"
+    assert "쪽" not in app.expander[0].get("caption")[0].value
+
+    app.chat_input[0].set_value("그럼 참가 자격은?").run()
+    assert not app.exception
+    assert calls == [None, {"doc_id": "a.pdf"}]
+    assert len(app.expander) == 2
+    assert [entry.value for entry in app.expander[1].get("text")] == ["참가 자격 근거"]
+    assert "PDF 7쪽" in app.expander[1].get("caption")[0].value
+
+    app.chat_input[0].set_value("고마워").run()
+    assert not app.exception
+    assert len(app.expander) == 2  # 검색하지 않은 답변에는 이전 근거를 붙이지 않습니다.
 
 
 def test_threads_are_separate(monkeypatch):

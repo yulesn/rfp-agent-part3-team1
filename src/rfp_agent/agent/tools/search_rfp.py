@@ -5,7 +5,7 @@
 - 도구의 docstring 은 LLM 이 "언제 이 도구를 쓸지" 판단하는 설명이라 구체적으로 써 주세요.
 - 후속 질문(2차 기능): 그래프 안에서는 대화 중인 공고(state 의 current_doc_id)가 있으면 그 공고 안에서만
   검색합니다. LLM 이 search_all=true 를 주면 전체 공고에서 검색합니다.
-  검색된 doc_id 목록은 artifact 로 돌려주고, track_doc 노드가 이것으로 current_doc_id 를 갱신합니다.
+  artifact의 doc_id 목록은 대화 중인 공고 추적에, 청크 본문과 출처는 화면 표시에 사용합니다.
 """
 
 from typing import Annotated
@@ -61,6 +61,18 @@ def make_search_rfp(config: dict):
         else:
             docs = retrieve(query, config)
             text = _format(docs)
-        return text, {"doc_ids": [d.metadata.get("doc_id") for d in docs]}
+        return text, {
+            "doc_ids": [doc.metadata.get("doc_id") for doc in docs],
+            "evidence": [
+                {
+                    "source": doc.metadata.get("파일명") or doc.metadata.get("source")
+                    or doc.metadata.get("doc_id") or "출처 미상",
+                    "chunk_id": doc.metadata.get("chunk_id"),
+                    "page_num": doc.metadata.get("page_num"),
+                    "text": doc.page_content,
+                }
+                for doc in docs
+            ],
+        }
 
     return configured_search

@@ -1,5 +1,9 @@
 """[프론트·백엔드·평가] 반응형 대화형 데모 UI (Streamlit)
 
+후속 질문: 브라우저 탭마다 thread_id 를 하나 만들어 매 질문에 넘깁니다. 이전 대화와 대화 중인 공고는
+그래프(checkpointer)가 thread_id 별로 기억하므로, 화면에는 새 질문만 넘기면 됩니다.
+원문 근거: 답변 아래에서 이번 질문으로 검색한 청크 본문과 출처를 확인할 수 있습니다.
+
 실행: uv run streamlit run app/streamlit_app.py
 """
 
@@ -9,6 +13,8 @@ import html
 import random
 import re
 import time
+from uuid import uuid4
+
 import httpx
 import streamlit as st
 import streamlit.components.v1 as components
@@ -23,7 +29,6 @@ st.set_page_config(
 API_URL = "http://localhost:8000/ask"
 HEALTH_URL = "http://localhost:8000/health"
 
-# 실제 RFP 100건 데이터에서 검증된 대표 질문 풀 (새로고침 클릭 시 8개 무작위 추출)
 FAQ_POOL: list[str] = [
     "서민금융진흥원 채팅 상담시스템 구축 사업의 사업예산과 사업기간은?",
     "서민금융진흥원 채팅 상담시스템 구축 사업의 무상 하자보수 기간은 얼마인가요?",
@@ -50,6 +55,13 @@ FAQ_POOL: list[str] = [
     "전기안전 관제시스템 보안 모듈 개발 사업과 JST 공유대학 LRS시스템 구축 사업의 사업기간 차이는 며칠인가요?",
     "고려대학교 차세대 포털·학사 정보시스템 구축 사업의 무상유지보수 기간은 언제부터 몇 개월인가요?",
 ]
+
+
+def new_chat() -> None:
+    """대화 내역을 비우고 새 thread_id를 발급합니다."""
+    st.session_state.messages = []
+    st.session_state.thread_id = str(uuid4())
+    st.session_state.pop("pending_question", None)
 
 
 def _check_backend_health() -> tuple[bool, str]:
@@ -124,26 +136,6 @@ def _scroll_to_bottom() -> None:
     )
 
 
-def _extract_source_display(src: dict) -> tuple[str, str]:
-    """출처 딕셔너리에서 (파일 양식 배지, 확장자 포함 표시 파일명)을 반환합니다."""
-    doc_id = str(src.get("doc_id", "")).strip()
-    title = str(src.get("title", "")).strip()
-    raw_name = doc_id or title or "문서명 없음"
-
-    ext_match = re.search(r"\.([a-zA-Z0-9]{2,5})$", raw_name)
-    ext = ext_match.group(1).upper() if ext_match else "DOC"
-
-    if doc_id and title and not doc_id.startswith(title):
-        display_name = f"{title} ({doc_id})"
-    else:
-        display_name = raw_name
-
-    return ext, display_name
-
-
-# ---------------------------------------------------------------------------
-# 1. 커스텀 CSS (전역 보더 제거 + 카드 내부 줄바꿈 + 상·하단 완벽 가운데 정렬)
-# ---------------------------------------------------------------------------
 CUSTOM_CSS = """
 <style>
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
@@ -182,7 +174,6 @@ iframe[height="0"] {
     padding-right: 1.5rem !important;
 }
 
-/* 좌·우 2단 컬럼 정렬 및 우측 '가장 많이 하는 질문' 카드 */
 [data-testid="stHorizontalBlock"] {
     align-items: flex-start !important;
 }
@@ -203,15 +194,11 @@ iframe[height="0"] {
     box-sizing: border-box !important;
 }
 
-/* 우측 카드 내부 각 컨텐츠(질문 버튼) 사이 간격(margin/gap) 확대 */
 [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) > div > [data-testid="stVerticalBlock"],
 [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) > div > [data-testid="stVerticalBlock"] {
     gap: 0.72rem !important;
 }
 
-/* -------------------------------------------------------------------------
-   모든 버튼 공통: 보더 완전 제거 + 카드 밖으로 튀어나가지 않도록 강제 줄바꿈
-   ------------------------------------------------------------------------- */
 div.stButton {
     width: 100% !important;
     max-width: 100% !important;
@@ -279,9 +266,6 @@ div.stButton > button span {
     overflow: visible !important;
 }
 
-/* -------------------------------------------------------------------------
-   우측 카드 내부 수평 블록(1번째: 상단 제목+새로고침 / 2번째: 하단 대화 비우기) 가운데 정렬
-   ------------------------------------------------------------------------- */
 [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) [data-testid="stHorizontalBlock"],
 [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="stHorizontalBlock"] {
     display: flex !important;
@@ -298,7 +282,6 @@ div.stButton > button span {
     min-width: 0 !important;
 }
 
-/* 1번째 수평 블록: '가장 많이 하는 질문' + '↻' 버튼 붙여서 가운데 정렬 */
 [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) [data-testid="stHorizontalBlock"]:first-of-type div.stButton,
 [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="stHorizontalBlock"]:first-of-type div.stButton {
     width: auto !important;
@@ -332,7 +315,7 @@ div.stButton > button span {
     background-color: #E5E7EB !important;
     background: #E5E7EB !important;
     color: #111111 !important;
-    transform: rotate(180deg) !important;
+    transform: scale(1.1) !important;
 }
 
 [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) [data-testid="stHorizontalBlock"]:first-of-type div.stButton > button p,
@@ -341,7 +324,6 @@ div.stButton > button span {
     line-height: 1 !important;
 }
 
-/* 2번째 수평 블록: 하단 '대화 비우기' 버튼 창 안에 중앙 정렬 */
 [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) [data-testid="stHorizontalBlock"]:last-of-type,
 [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) [data-testid="stHorizontalBlock"]:last-of-type {
     margin-top: 6px !important;
@@ -381,7 +363,6 @@ div.stButton > button span {
     text-align: center !important;
 }
 
-/* 상단 헤더 & 서버·모델 상태 배지 */
 .conv-header {
     display: flex;
     align-items: center;
@@ -432,9 +413,6 @@ div.stButton > button span {
     background: #FF3B30;
 }
 
-/* -------------------------------------------------------------------------
-   첫 화면(랜딩) 4단 캐릭터 말풍선
-   ------------------------------------------------------------------------- */
 .hero-stack {
     display: flex;
     flex-direction: column;
@@ -583,9 +561,6 @@ div.stButton > button span {
     animation: faceFloat 3.2s ease-in-out infinite;
 }
 
-/* -------------------------------------------------------------------------
-   실제 대화 말풍선 (보더 없음)
-   ------------------------------------------------------------------------- */
 .chat-bubble {
     padding: 18px 22px;
     margin-bottom: 18px;
@@ -643,7 +618,6 @@ div.stButton > button span {
     font-weight: 500;
 }
 
-/* 타이핑 로딩 말풍선 */
 .typing-dots {
     display: inline-flex;
     gap: 6px;
@@ -660,7 +634,6 @@ div.stButton > button span {
 .typing-dots span:nth-child(2) { animation-delay: 0.16s; }
 .typing-dots span:nth-child(3) { animation-delay: 0.32s; }
 
-/* 우측 '가장 많이 하는 질문' 카드 타이틀 */
 .faq-box-title {
     font-size: 1.02rem;
     font-weight: 900;
@@ -670,13 +643,10 @@ div.stButton > button span {
     gap: 6px;
     white-space: nowrap;
     line-height: 32px;
-    margin-bottom: 14px;
-    margin-left: 30px;
+    margin: 0 0 12px 36px;
 }
 
-/* -------------------------------------------------------------------------
-   참고 문서 및 근거 출처 토글 (Hug 너비 + 모든 보더 제거)
-   ------------------------------------------------------------------------- */
+/* 검색된 원문 근거 보기 토글 */
 [data-testid="stExpander"] {
     width: fit-content !important;
     max-width: 88% !important;
@@ -743,44 +713,27 @@ div.stButton > button span {
     border: none !important;
     outline: none !important;
     background-color: #FFFFFF !important;
-    padding: 12px 18px 14px 18px !important;
+    padding: 14px 18px 16px 18px !important;
     color: #111111 !important;
 }
 
-.source-title-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 0.88rem;
-    font-weight: 700;
+[data-testid="stExpanderDetails"] [data-testid="stCaptionContainer"],
+[data-testid="stExpanderDetails"] [data-testid="stCaptionContainer"] p {
+    color: #374151 !important;
+    font-weight: 700 !important;
+    font-size: 0.82rem !important;
+}
+
+[data-testid="stExpanderDetails"] pre,
+[data-testid="stExpanderDetails"] code {
+    background-color: #F8F9FA !important;
     color: #111111 !important;
-    padding: 5px 0;
-    line-height: 1.45;
+    border: none !important;
+    border-radius: 10px !important;
+    white-space: pre-wrap !important;
+    word-break: keep-all !important;
 }
 
-.file-ext-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 2px 7px;
-    border-radius: 6px;
-    font-size: 0.72rem;
-    font-weight: 800;
-    letter-spacing: 0.03em;
-    background: #111111;
-    color: #FFFFFF !important;
-    flex-shrink: 0;
-}
-
-.file-ext-badge.ext-hwp {
-    background: #0077FF;
-}
-
-.file-ext-badge.ext-pdf {
-    background: #FF5500;
-}
-
-/* 하단 채팅 입력창 (보더 완전 제거) */
 [data-testid="stChatInput"] {
     max-width: 1220px;
     margin: 0 auto;
@@ -906,9 +859,6 @@ div.stButton > button span {
 
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
-# ---------------------------------------------------------------------------
-# 2. 4종 캐릭터 얼굴 SVG & 말풍선 렌더러
-# ---------------------------------------------------------------------------
 FACES = {
     "yellow": '<svg class="cute-face" width="42" height="30" viewBox="0 0 44 32" fill="none"><rect x="10" y="3" width="7" height="11" rx="3.5" fill="#111111"/><rect x="27" y="3" width="7" height="11" rx="3.5" fill="#111111"/><ellipse cx="22" cy="22" rx="7.5" ry="6" fill="#111111"/><ellipse cx="22" cy="22" rx="3" ry="2.2" fill="#FFA800"/></svg>',
     "orange": '<svg class="cute-face" width="42" height="28" viewBox="0 0 44 30" fill="none"><rect x="11" y="4" width="6.5" height="10" rx="3.2" fill="#111111"/><rect x="26.5" y="4" width="6.5" height="10" rx="3.2" fill="#111111"/><path d="M16 19C17.5 23 26.5 23 28 19" stroke="#111111" stroke-width="4.2" stroke-linecap="round"/></svg>',
@@ -925,7 +875,7 @@ def _format_text(text: str) -> str:
 
 
 def render_chat_bubble(role: str, content: str) -> None:
-    """실제 질문(파란색)과 답변(화이트)을 보더 없는 깔끔한 말풍선으로 렌더링합니다."""
+    """실제 질문(파란색)과 답변(화이트)을 깔끔한 말풍선으로 렌더링합니다."""
     if role == "user":
         bubble_cls = "user-bubble"
         role_label = "질문"
@@ -980,8 +930,11 @@ def render_empty_hero() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 3. 상태 관리 & 2단 반응형 레이아웃 (좌: 대화 영역 / 우: 가장 많이 하는 질문 8개)
+# 상태 관리 (세션별 thread_id 유지 및 초기화)
 # ---------------------------------------------------------------------------
+if "thread_id" not in st.session_state:
+    new_chat()
+
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -993,7 +946,6 @@ left_col, right_col = st.columns([2.1, 1.05], gap="large")
 selected_example = None
 
 with right_col:
-    # 1번째 수평 블록: '가장 많이 하는 질문'과 '↻' 버튼을 나란히 붙여 상단 중앙 정렬
     hdr_col, refresh_col = st.columns([1, 1], gap="small")
     with hdr_col:
         st.markdown(
@@ -1009,12 +961,10 @@ with right_col:
         if st.button(q, key=f"faq_{idx}", use_container_width=True):
             selected_example = q
 
-    # 2번째 수평 블록: 하단 '대화 비우기' 버튼 창 안에 중앙 정렬
     _, clear_center_col, _ = st.columns([1, 2, 1])
     with clear_center_col:
         if st.button("🗑️ 대화 비우기", key="clear_chat"):
-            st.session_state.messages = []
-            st.session_state.pop("pending_question", None)
+            new_chat()
             st.rerun()
 
 with left_col:
@@ -1043,28 +993,20 @@ with left_col:
         for msg in st.session_state.messages:
             render_chat_bubble(msg["role"], msg["content"])
             if msg["role"] == "assistant" and msg.get("sources"):
-                unique_sources: list[tuple[str, str]] = []
-                seen_labels: set[str] = set()
-                for src in msg["sources"]:
-                    ext, display_name = _extract_source_display(src)
-                    if display_name not in seen_labels:
-                        seen_labels.add(display_name)
-                        unique_sources.append((ext, display_name))
+                sources_list = msg["sources"]
+                with st.expander(f"검색된 원문 근거 보기 ({len(sources_list)}개)", expanded=False):
+                    for item in sources_list:
+                        source_name = str(item.get("doc_id") or item.get("title") or "출처 미상")
+                        citation = [source_name]
+                        if item.get("chunk_id"):
+                            citation.append(f"청크: {item['chunk_id']}")
+                        page = item.get("page_num")
+                        if type(page) is int and page > 0:
+                            prefix = "PDF " if source_name.lower().endswith(".pdf") else ""
+                            citation.append(f"{prefix}{page}쪽")
+                        st.caption(" | ".join(citation))
+                        st.text(str(item.get("snippet") or ""))
 
-                with st.expander(f"📄 참고 문서 및 근거 출처 ({len(unique_sources)}건)", expanded=False):
-                    for ext, display_name in unique_sources:
-                        ext_cls = f"ext-{ext.lower()}" if ext.lower() in {"hwp", "pdf"} else ""
-                        st.markdown(
-                            f"<div class='source-title-item'>"
-                            f"<span class='file-ext-badge {ext_cls}'>{html.escape(ext)}</span>"
-                            f"<span>{html.escape(display_name)}</span>"
-                            f"</div>",
-                            unsafe_allow_html=True,
-                        )
-
-# ---------------------------------------------------------------------------
-# 4. 질문 입력/클릭 즉시 맨 아래로 스크롤 + 백엔드 API 호출
-# ---------------------------------------------------------------------------
 user_input = st.chat_input("공고에 대해 무엇이든 물어보세요...")
 incoming_question = selected_example or user_input
 
@@ -1095,7 +1037,11 @@ if pending_q:
         _scroll_to_bottom()
 
         try:
-            response = httpx.post(API_URL, json={"question": pending_q}, timeout=90.0)
+            response = httpx.post(
+                API_URL,
+                json={"question": pending_q, "thread_id": st.session_state.thread_id},
+                timeout=90.0,
+            )
             if response.status_code >= 400:
                 detail = ""
                 try:
