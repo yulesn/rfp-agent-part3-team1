@@ -18,6 +18,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from rfp_agent.agent.nodes import DEFAULT_HISTORY_TURNS, make_call_model, track_doc
 from rfp_agent.agent.state import AgentState
 from rfp_agent.agent.tools import ALL_TOOLS
+from rfp_agent.agent.tools.filter_metadata import filter_rfp_by_metadata, make_filter_rfp_by_metadata
 from rfp_agent.agent.tools.search_rfp import make_search_rfp, search_rfp
 from rfp_agent.agent.tools.summarize_rfp import make_summarize_rfp, summarize_rfp
 from rfp_agent.agent.trace import LLMCallRecorder
@@ -36,7 +37,11 @@ def build_graph(config: dict, *, tools=None, checkpointer=None):
     """
     selected = ALL_TOOLS if tools is None else tools
     # LLM과 도구가 서로 다른 설정 파일을 읽지 않도록 같은 config를 전달합니다.
-    factories = [(search_rfp, make_search_rfp), (summarize_rfp, make_summarize_rfp)]
+    factories = [
+        (search_rfp, make_search_rfp),
+        (filter_rfp_by_metadata, make_filter_rfp_by_metadata),
+        (summarize_rfp, make_summarize_rfp),
+    ]
     configured = [
         next((make(config) for base, make in factories if item is base), item) for item in selected
     ]
