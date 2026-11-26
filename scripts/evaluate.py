@@ -105,6 +105,7 @@ def main() -> None:
     parser.add_argument("--questions", default="eval/questions.jsonl", help="평가셋 JSONL 경로")
     parser.add_argument("--limit", type=int, default=0, help="앞에서 N문항만 실행 (0이면 전체)")
     parser.add_argument("--llm-judge", action="store_true", help="LLM-as-a-judge 채점 활성화")
+    parser.add_argument("--judge-model", default="", help="LLM Judge 전용 모델명 (예: gpt-5-mini)")
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -120,7 +121,21 @@ def main() -> None:
 
     print(f"평가 시작 | 설정: {args.config} ({model_name}) | 문항 수: {len(questions)}개")
     graph = build_graph(config)
-    judge_llm = get_llm(config) if args.llm_judge else None
+
+    judge_llm = None
+    if args.llm_judge or args.judge_model:
+        judge_section = dict(config.get("judge_llm") or {})
+        if args.judge_model:
+            judge_section["model"] = args.judge_model
+            judge_section["provider"] = (
+                "ollama"
+                if any(k in args.judge_model.lower() for k in ("gemma", "llama", "qwen", "mistral"))
+                else "openai"
+            )
+        if not judge_section:
+            judge_section = {"provider": "openai", "model": "gpt-5-mini", "temperature": 0}
+        judge_section.setdefault("temperature", 0)
+        judge_llm = get_llm({**config, "llm": judge_section})
 
     rows: list[dict[str, Any]] = []
     by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -157,8 +172,8 @@ def main() -> None:
         ans_res = score_answer(item, prediction)
         ans_score = ans_res["answer_score"]
 
-        judge_res: dict[str, float] | None = None
-        if judge_llm is not None:
+        judge_res: dict[str, Any] | None = None
+        if judge_llm is not None and not error_msg:
             ref_text = (
                 json.dumps(item["answer_facts"], ensure_ascii=False)
                 if q_type == "summary"
@@ -176,6 +191,7 @@ def main() -> None:
             "mrr": "" if mrr_score is None else mrr_score,
             "recall_at_k": "" if r_score is None else r_score,
             "answer_score": ans_score,
+            "judge_reason": "" if judge_res is None else judge_res.get("reason", ""),
             "judge_accuracy": "" if judge_res is None else judge_res["accuracy"],
             "judge_faithfulness": "" if judge_res is None else judge_res["faithfulness"],
             "judge_score": "" if judge_res is None else judge_res["score"],

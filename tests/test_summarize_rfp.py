@@ -103,7 +103,7 @@ def test_graph_passes_config_to_summarize(monkeypatch):
     graph = import_module("rfp_agent.agent.graph")
     seen = []
     monkeypatch.setattr(summarize, "_summarize_doc",
-                        lambda name, config, llm=None: (seen.append(config) or "ok", None))
+                        lambda name, config, llm=None, current_doc_id=None: (seen.append(config) or "ok", None))
 
     class TestLLM:
         def bind_tools(self, tools):
@@ -155,3 +155,12 @@ def test_show_trace_records_every_llm_call_including_inside_summarize(monkeypatc
     plain = graph.build_graph(CONFIG, tools=[summarize.summarize_rfp])
     agent_llm.messages = iter([AIMessage(content="답")])
     assert plain.invoke({"messages": [("user", "안녕")]})["messages"][-1].content == "답"
+
+
+def test_pick_rfp_uses_current_doc_for_pointer_or_ambiguous_name():
+    pick = summarize._pick_rfp
+    assert [r["doc_id"] for r in pick("", CATALOG, "c.hwp")] == ["c.hwp"]
+    assert [r["doc_id"] for r in pick("이 공고", CATALOG, "c.hwp")] == ["c.hwp"]
+    assert [r["doc_id"] for r in pick("국민연금공단", CATALOG, "c.hwp")] == ["c.hwp"]  # 여러 건 중 대화 중인 공고
+    assert [r["doc_id"] for r in pick("서민금융 채팅 상담시스템", CATALOG, "c.hwp")] == ["a.hwp"]  # 다른 공고 이름은 그대로
+    assert pick("이 공고", CATALOG, None) == []  # 대화 중인 공고가 없으면 못 찾음
