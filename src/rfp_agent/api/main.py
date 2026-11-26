@@ -32,17 +32,18 @@ def _load_doc_titles() -> dict[str, str]:
         return _doc_titles
 
     titles: dict[str, str] = {}
-    docs_path = Path("data/documents.jsonl")
-    if docs_path.exists():
-        with docs_path.open(encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                row = json.loads(line)
-                doc_id = row.get("doc_id", "")
-                meta = row.get("metadata") or {}
-                titles[doc_id] = meta.get("title") or doc_id.rsplit(".", 1)[0]
+    for candidate in (Path("data/processed/documents.jsonl"), Path("data/documents.jsonl")):
+        if candidate.exists():
+            with candidate.open(encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    row = json.loads(line)
+                    doc_id = row.get("doc_id", "")
+                    meta = row.get("metadata") or {}
+                    titles[doc_id] = meta.get("title") or doc_id.rsplit(".", 1)[0]
+            break
     _doc_titles = titles
     return _doc_titles
 
@@ -105,8 +106,14 @@ def _extract_sources(messages: list[Any]) -> list[Source]:
 
 @app.get("/health")
 def health() -> dict:
-    """서버가 살아 있는지 확인"""
-    return {"status": "ok"}
+    """서버가 살아 있는지와 현재 연결된 LLM 모델명을 확인합니다."""
+    cfg = load_config()
+    llm_cfg = cfg.get("llm") or {}
+    return {
+        "status": "ok",
+        "provider": llm_cfg.get("provider", ""),
+        "model": llm_cfg.get("model", ""),
+    }
 
 
 @app.post("/ask", response_model=AskResponse)
