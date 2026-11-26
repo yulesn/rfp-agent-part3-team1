@@ -101,25 +101,72 @@ def keyword_match_score(answer: str, reference: str) -> float:
     return round(kw_recall, 4)
 
 
+# "문서에 없다"고 답했는지 보는 표현. "제공된 문서", "없습니다" 같은 흔한 말은 넣지 않습니다
+# (엉뚱한 문서를 보고 답해도 통과해 버림). "명시되어 있지는 않습니다"처럼 조사가 붙은 것도 잡습니다.
+ABSTENTION_PATTERNS = (
+    r"(명시|기재|포함|언급|규정|제시|나와|정해져|기술)\s*(되어|돼)?\s*있지\s*(는|도)?\s*않",
+    r"(명시|기재|언급|확인|규정)되지\s*(는|도)?\s*않",
+    r"(확인할|파악할|찾을|알)\s*수\s*(가\s*)?없",
+    r"(명시|기재|정보|내용)\s*없음",
+    r"정해진\s*바\s*(가\s*)?없",
+)
+
+
 def score_unanswerable(answer: str) -> float:
     """문서에 없는 정보 질문(unanswerable)에 대해 환각 없이 미기재·확인 불가를 답했는지 채점합니다."""
     if not answer or not answer.strip():
         return 0.0
-    abstention_cues = (
-        "확인할 수 없",
-        "명시되어 있지 않",
-        "기재되어 있지 않",
-        "찾을 수 없",
-        "포함되어 있지 않",
-        "정해진 바 없",
-        "알 수 없",
-        "제공된 문서",
-        "제공된 제안요청서",
-        "과업지시서만으로는",
-        "없습니다",
-        "없다",
-    )
-    return 1.0 if any(cue in answer for cue in abstention_cues) else 0.0
+    return 1.0 if any(re.search(p, answer) for p in ABSTENTION_PATTERNS) else 0.0
+
+
+def _first_call(calls: list[tuple[str, list[str]]], tool_name: str) -> list[str]:
+    """tool_name 의 첫 호출 결과. 그 도구를 안 썼으면 첫 도구 호출 결과를 씁니다."""
+    for name, doc_ids in calls:
+        if name == tool_name:
+            return doc_ids
+    return calls[0][1] if calls else []
+
+
+def retrieval_scores(
+    q_type: str,
+    calls: list[tuple[str, list[str]]],
+    answer_doc_id: str | list[str],
+    k: int = 5,
+) -> dict[str, float | None]:
+    """검색 한 번의 top-k 기준 hit@k, MRR, recall@k.
+
+    calls: 에이전트의 도구 호출 순서대로 (도구 이름, 검색된 doc_id 목록).
+    - summary: 첫 summarize_rfp 호출이 고른 공고가 맞는지
+    - multi_doc: 정답 문서마다 어느 한 번의 search_rfp top-k 에 들어왔는지 본다
+      hit 은 정답 문서를 전부 찾았으면 1 (비교 질문에 답할 수 있는지), recall 은 찾은 비율,
+      MRR 은 정답 문서마다 가장 좋은 순위의 역수를 평균
+    - 그 외: 첫 search_rfp 호출의 top-k
+    정답 문서가 없는 질문은 모두 None.
+    """
+    targets = _to_doc_list(answer_doc_id)
+    if not targets:
+        return {"hit_at_k": None, "mrr": None, "recall_at_k": None}
+
+    if q_type == "multi_doc":
+        searches = [ids[:k] for name, ids in calls if name == "search_rfp"] or [ids[:k] for _, ids in calls]
+        found, rrs = [], []
+        for target in targets:
+            ranks = [ids.index(target) + 1 for ids in searches if target in ids]
+            found.append(1.0 if ranks else 0.0)
+            rrs.append(1.0 / min(ranks) if ranks else 0.0)
+        return {
+            "hit_at_k": 1.0 if all(found) else 0.0,
+            "mrr": round(sum(rrs) / len(targets), 4),
+            "recall_at_k": round(sum(found) / len(targets), 4),
+        }
+
+    tool_name = "summarize_rfp" if q_type == "summary" else "search_rfp"
+    ranked = _first_call(calls, tool_name)[:k]
+    return {
+        "hit_at_k": hit_at_k(ranked, targets),
+        "mrr": mrr(ranked, targets),
+        "recall_at_k": recall_at_k(ranked, targets),
+    }
 
 
 def score_summary(answer_facts: dict[str, Any], answer: str) -> tuple[float, dict[str, float]]:
