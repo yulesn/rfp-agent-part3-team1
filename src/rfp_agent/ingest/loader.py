@@ -6,6 +6,7 @@
 - CSV 메타데이터를 문서에 연결한다.
 - ParsedDocument 객체로 변환한다.
 - JSONL 형식으로 저장하고 다시 불러온다.
+- PDF 페이지 정보를 보존하여 RAG 출처에 활용한다.
 """
 
 import json
@@ -42,7 +43,6 @@ def clean_unicode(value):
         return [clean_unicode(item) for item in value]
 
     return value
-
 
 
 def load_documents(
@@ -84,16 +84,25 @@ def load_documents(
         )
 
         if extension in (".hwp", ".hwpx"):
-            parser = parse_hwp
+            parser = "hwp"
+
         elif extension == ".pdf":
-            parser = parse_pdf
+            parser = "pdf"
+
         else:
             skipped_files.append(file_path.name)
             print("  지원하지 않는 파일 형식 - 건너뜀", flush=True)
             continue
 
         try:
-            text = parser(file_path)
+            # HWP/HWPX: 기존 방식으로 전체 텍스트 추출
+            if parser == "hwp":
+                text = parse_hwp(file_path)
+                pages = []
+
+            # PDF: 전체 텍스트와 페이지별 텍스트 추출
+            else:
+                text, pages = parse_pdf(file_path)
 
             if not text or not text.strip():
                 raise ValueError("추출된 텍스트가 없습니다.")
@@ -112,7 +121,8 @@ def load_documents(
                 ParsedDocument(
                     doc_id=file_path.name,
                     text=text,
-                    metadata=metadata
+                    metadata=metadata,
+                    pages=pages
                 )
             )
 
@@ -144,7 +154,6 @@ def load_documents(
     return documents
 
 
-
 def save_documents(
     docs: list[ParsedDocument],
     path: str | Path
@@ -159,7 +168,8 @@ def save_documents(
             data = {
                 "doc_id": doc.doc_id,
                 "text": doc.text,
-                "metadata": doc.metadata
+                "metadata": doc.metadata,
+                "pages": doc.pages,
             }
 
             data = clean_unicode(data)
@@ -195,7 +205,8 @@ def read_documents(
                     ParsedDocument(
                         doc_id=data["doc_id"],
                         text=data["text"],
-                        metadata=data.get("metadata", {})
+                        metadata=data.get("metadata", {}),
+                        pages=data.get("pages", [])
                     )
                 )
 
