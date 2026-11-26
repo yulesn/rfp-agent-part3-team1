@@ -23,6 +23,14 @@ RFP RAG 에이전트의 검색 정확도와 답변 품질을 자동으로 측정
   * `{YYYYMMDD}_{HHMMSS}_{설정명}.csv`: 문항별 상세 채점표 및 모델 답변
   * `{YYYYMMDD}_{HHMMSS}_{설정명}_summary.json`: 전체 평균 및 유형별 요약 리포트
 
+## 검색 지표 계산 기준
+
+검색 한 번의 top-k(`retrieval.top_k`) 결과로 계산합니다.
+* 단일 문서 문항: 첫 `search_rfp` 호출의 top-k 로 Hit@K, MRR, Recall@K
+* `multi_doc`: 정답 문서마다 어느 한 번의 `search_rfp` top-k 에 들어왔는지 봅니다. Hit 은 정답 문서를 전부 찾았으면 1, Recall 은 찾은 비율
+* `summary`: 첫 `summarize_rfp` 호출이 고른 공고가 정답인지
+* CSV 의 `hit_any`, `recall_any` 는 비교용으로, 에이전트가 모든 도구 호출에서 본 문서 전체 기준입니다.
+
 ---
 
 ## 2. 실행 전 사전 준비

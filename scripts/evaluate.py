@@ -30,6 +30,7 @@ from rfp_agent.evaluation.metrics import (
     llm_judge,
     mrr,
     recall_at_k,
+    retrieval_scores,
     score_answer,
 )
 from rfp_agent.llm import get_llm
@@ -62,9 +63,12 @@ def _load_valid_doc_ids(documents_path: str = "data/processed/documents.jsonl") 
     return doc_ids
 
 
-def _extract_tool_info(messages: list[Any], valid_doc_ids: set[str]) -> tuple[list[str], str, int, int]:
-    """메시지 기록에서 검색된 doc_id 목록, 근거 텍스트, 총 입·출력 토큰 수를 추출합니다."""
+def _extract_tool_info(
+    messages: list[Any], valid_doc_ids: set[str]
+) -> tuple[list[str], list[tuple[str, list[str]]], str, int, int]:
+    """메시지 기록에서 검색된 doc_id 목록(전체·도구 호출별), 근거 텍스트, 총 입·출력 토큰 수를 추출합니다."""
     found: list[str] = []
+    calls: list[tuple[str, list[str]]] = []  # 도구 호출 순서대로 (도구 이름, 그 호출이 돌려준 doc_id 순위)
     contexts: list[str] = []
     prompt_tokens = 0
     completion_tokens = 0
@@ -86,7 +90,9 @@ def _extract_tool_info(messages: list[Any], valid_doc_ids: set[str]) -> tuple[li
             # search_rfp 는 검색된 doc_id 목록을 artifact 로 돌려줍니다 (순위 그대로).
             artifact = getattr(msg, "artifact", None)
             if isinstance(artifact, dict):
-                for doc_id in artifact.get("doc_ids", []):
+                call_ids = [d for d in artifact.get("doc_ids", []) if d]
+                calls.append((msg.name or "", list(dict.fromkeys(call_ids))))
+                for doc_id in call_ids:
                     _add(doc_id)
 
             try:
@@ -102,7 +108,7 @@ def _extract_tool_info(messages: list[Any], valid_doc_ids: set[str]) -> tuple[li
                 if doc_id in raw:
                     _add(doc_id)
 
-    return found, "\n---\n".join(contexts)[:3000], prompt_tokens, completion_tokens
+    return found, calls, "\n---\n".join(contexts)[:3000], prompt_tokens, completion_tokens
 
 
 def main() -> None:
@@ -116,6 +122,7 @@ def main() -> None:
     config = load_config(args.config)
     model_name = str(config.get("llm", {}).get("model", "gpt-4o-mini"))
     valid_doc_ids = _load_valid_doc_ids()
+    top_k = int(config.get("retrieval", {}).get("top_k", 5))
 
     questions_path = Path(args.questions)
     with questions_path.open(encoding="utf-8") as f:
@@ -148,6 +155,7 @@ def main() -> None:
         error_msg = ""
         prediction = ""
         retrieved_ids: list[str] = []
+        calls: list[tuple[str, list[str]]] = []
         context_text = ""
         in_tok = 0
         out_tok = 0
@@ -157,16 +165,19 @@ def main() -> None:
             messages = result.get("messages", [])
             if messages:
                 prediction = _content_to_str(messages[-1].content)
-            retrieved_ids, context_text, in_tok, out_tok = _extract_tool_info(messages, valid_doc_ids)
+            retrieved_ids, calls, context_text, in_tok, out_tok = _extract_tool_info(messages, valid_doc_ids)
         except Exception as exc:
             error_msg = f"{type(exc).__name__}: {exc}"
 
         latency = round(time.perf_counter() - start, 2)
         cost_usd = estimate_token_cost(in_tok, out_tok, model=model_name)
 
-        h_score = hit_at_k(retrieved_ids, answer_doc_ids)
-        mrr_score = mrr(retrieved_ids, answer_doc_ids)
-        r_score = recall_at_k(retrieved_ids, answer_doc_ids)
+        # 검색 한 번의 top-k 기준 (유형별 계산은 metrics.retrieval_scores 참고)
+        ret = retrieval_scores(q_type, calls, answer_doc_ids, k=top_k)
+        h_score, mrr_score, r_score = ret["hit_at_k"], ret["mrr"], ret["recall_at_k"]
+        # 비교용: 에이전트가 모든 도구 호출에서 본 문서 전체 기준
+        h_any = hit_at_k(retrieved_ids, answer_doc_ids)
+        r_any = recall_at_k(retrieved_ids, answer_doc_ids)
         ans_res = score_answer(item, prediction)
         ans_score = ans_res["answer_score"]
 
@@ -188,6 +199,9 @@ def main() -> None:
             "hit_at_k": "" if h_score is None else h_score,
             "mrr": "" if mrr_score is None else mrr_score,
             "recall_at_k": "" if r_score is None else r_score,
+            "hit_any": "" if h_any is None else h_any,
+            "recall_any": "" if r_any is None else r_any,
+            "tool_calls": " > ".join(f"{name}({len(ids)})" for name, ids in calls),
             "answer_score": ans_score,
             "judge_reason": "" if judge_res is None else judge_res.get("reason", ""),
             "judge_accuracy": "" if judge_res is None else judge_res["accuracy"],
@@ -225,6 +239,7 @@ def main() -> None:
     hit_vals = [r["hit_at_k"] for r in rows if r["hit_at_k"] != ""]
     mrr_vals = [r["mrr"] for r in rows if r["mrr"] != ""]
     rec_vals = [r["recall_at_k"] for r in rows if r["recall_at_k"] != ""]
+    hit_any_vals = [r["hit_any"] for r in rows if r["hit_any"] != ""]
     ans_vals = [r["answer_score"] for r in rows]
     lat_vals = [r["latency_sec"] for r in rows]
     judge_vals = [r["judge_score"] for r in rows if r["judge_score"] != ""]
@@ -238,6 +253,7 @@ def main() -> None:
         "avg_hit_at_k": round(sum(hit_vals) / len(hit_vals), 4) if hit_vals else 0.0,
         "avg_mrr": round(sum(mrr_vals) / len(mrr_vals), 4) if mrr_vals else 0.0,
         "avg_recall_at_k": round(sum(rec_vals) / len(rec_vals), 4) if rec_vals else 0.0,
+        "avg_hit_any": round(sum(hit_any_vals) / len(hit_any_vals), 4) if hit_any_vals else 0.0,
         "avg_answer_score": round(sum(ans_vals) / len(ans_vals), 4) if ans_vals else 0.0,
         "avg_llm_judge": round(sum(judge_vals) / len(judge_vals), 4) if judge_vals else None,
         "avg_latency_sec": round(sum(lat_vals) / len(lat_vals), 2) if lat_vals else 0.0,
@@ -261,6 +277,7 @@ def main() -> None:
     print(f"- 검색 Hit@K       : {summary['avg_hit_at_k']:.2%}")
     print(f"- 검색 MRR         : {summary['avg_mrr']:.4f}")
     print(f"- 검색 Recall@K    : {summary['avg_recall_at_k']:.2%}")
+    print(f"- (참고) 본 문서 전체 Hit : {summary['avg_hit_any']:.2%}")
     print(f"- 평균 답변 점수   : {summary['avg_answer_score']:.2%}")
     if summary["avg_llm_judge"] is not None:
         print(f"- LLM Judge 점수   : {summary['avg_llm_judge']:.2%}")
