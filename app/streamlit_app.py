@@ -7,12 +7,13 @@
 후속 질문: 브라우저 탭마다 thread_id 를 하나 만들어 매 질문에 넘깁니다. 이전 대화와 대화 중인 공고는
 그래프(checkpointer)가 thread_id 별로 기억하므로, 화면에는 새 질문만 넘기면 됩니다.
 
-추가하면 좋은 것: 답변의 출처(문서명) 표시, 도구 호출 과정 펼쳐보기, 예시 질문 버튼
+원문 근거: 답변 아래에서 이번 질문으로 검색한 청크 본문과 출처를 확인할 수 있습니다.
 """
 
 import uuid
 
 import streamlit as st
+from langchain_core.messages import HumanMessage, ToolMessage
 
 from rfp_agent.agent.graph import build_graph, new_memory
 from rfp_agent.config import load_config
@@ -31,14 +32,49 @@ def new_chat() -> None:
     st.session_state.messages = []
 
 
+def current_search_evidence(messages):
+    for index in range(len(messages) - 1, -1, -1):
+        if isinstance(messages[index], HumanMessage):
+            break
+    else:
+        return []
+
+    unique = {}
+    for message in messages[index + 1:]:
+        if not isinstance(message, ToolMessage) or message.name != "search_rfp":
+            continue
+        if isinstance(message.artifact, dict):
+            for item in message.artifact.get("evidence", []):
+                key = (item["source"], item["chunk_id"] or item["text"])
+                unique.setdefault(key, item)
+    return list(unique.values())
+
+
+def render_message(role, content, evidence=()):
+    with st.chat_message(role):
+        st.write(content)
+        if evidence:
+            with st.expander(f"검색된 원문 근거 보기 ({len(evidence)}개)"):
+                for item in evidence:
+                    citation = [item["source"]]
+                    if item["chunk_id"]:
+                        citation.append(f"청크: {item['chunk_id']}")
+                    page = item["page_num"]
+                    if type(page) is int and page > 0:
+                        prefix = "PDF " if item["source"].lower().endswith(".pdf") else ""
+                        citation.append(f"{prefix}{page}쪽")
+                    st.caption(" | ".join(citation))
+                    st.text(item["text"])
+
+
 if "thread_id" not in st.session_state:
     new_chat()
 
-for role, content in st.session_state.messages:
-    st.chat_message(role).write(content)
+for message in st.session_state.messages:
+    render_message(*message)
 
 if question := st.chat_input("RFP에 대해 물어보세요"):
-    st.chat_message("user").write(question)
+    render_message("user", question)
     st.session_state.messages.append(("user", question))
 
     with st.spinner("문서를 찾는 중..."):
@@ -46,7 +82,7 @@ if question := st.chat_input("RFP에 대해 물어보세요"):
             {"messages": [("user", question)]},
             {"configurable": {"thread_id": st.session_state.thread_id}},
         )
-    answer = result["messages"][-1].content
-
-    st.chat_message("assistant").write(answer)
-    st.session_state.messages.append(("assistant", answer))
+    messages = result["messages"]
+    reply = ("assistant", messages[-1].content, current_search_evidence(messages))
+    render_message(*reply)
+    st.session_state.messages.append(reply)
