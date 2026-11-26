@@ -262,24 +262,21 @@ def llm_judge(
         return {"reason": f"채점 파싱 오류: {exc}", "accuracy": 0.0, "faithfulness": 0.0, "score": 0.0}
     return {"reason": "JSON 응답 형식 오류", "accuracy": 0.0, "faithfulness": 0.0, "score": 0.0}
 
-def estimate_token_cost(prompt_tokens: int, completion_tokens: int, model: str = "gpt-4o-mini") -> float:
-    """모델별 1M 토큰 단가 기준 예상 API 비용(USD)을 계산합니다 (로컬 Ollama/Gemma는 0.0)."""
-    model_lower = model.lower()
-    if "gemma" in model_lower or "ollama" in model_lower or "local" in model_lower:
-        return 0.0
+def sum_usage(usage_by_model: dict[str, dict[str, Any]]) -> tuple[int, int]:
+    """get_usage_metadata_callback() 결과(모델별 사용량)를 합쳐 (입력 토큰, 출력 토큰)으로 돌려줍니다."""
+    in_tok = sum(int(u.get("input_tokens", 0)) for u in usage_by_model.values())
+    out_tok = sum(int(u.get("output_tokens", 0)) for u in usage_by_model.values())
+    return in_tok, out_tok
 
-    # 1M(1,000,000) 토큰당 USD 단가 (input, output)
-    pricing: dict[str, tuple[float, float]] = {
-        "gpt-4o-mini": (0.15, 0.60),
-        "gpt-4o": (2.50, 10.00),
-        "gpt-4.1-mini": (0.40, 1.60),
-        "gpt-4.1": (2.00, 8.00),
-    }
-    in_rate, out_rate = pricing.get("gpt-4o-mini", (0.15, 0.60))
-    for key, rates in pricing.items():
-        if key in model_lower:
-            in_rate, out_rate = rates
-            break
 
-    cost = (prompt_tokens / 1_000_000) * in_rate + (completion_tokens / 1_000_000) * out_rate
-    return round(cost, 6)
+def estimate_token_cost(input_tokens: int, output_tokens: int, price_per_1m: dict | None) -> float | None:
+    """설정 파일의 price_per_1m(1M 토큰당 USD, input/output)으로 비용을 계산합니다.
+
+    단가가 안 적혀 있으면 None (0 이 아니라 "계산 안 됨"). 로컬 모델은 yaml 에 0 을 적어 주세요.
+    """
+    if not price_per_1m:
+        return None
+    in_rate, out_rate = price_per_1m.get("input"), price_per_1m.get("output")
+    if in_rate is None or out_rate is None:
+        return None
+    return round(input_tokens / 1_000_000 * float(in_rate) + output_tokens / 1_000_000 * float(out_rate), 6)

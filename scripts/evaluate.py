@@ -20,7 +20,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.callbacks import get_usage_metadata_callback
+from langchain_core.messages import ToolMessage
 
 from rfp_agent.agent.graph import build_graph
 from rfp_agent.config import load_config
@@ -32,6 +33,7 @@ from rfp_agent.evaluation.metrics import (
     recall_at_k,
     retrieval_scores,
     score_answer,
+    sum_usage,
 )
 from rfp_agent.llm import get_llm
 
@@ -65,24 +67,17 @@ def _load_valid_doc_ids(documents_path: str = "data/processed/documents.jsonl") 
 
 def _extract_tool_info(
     messages: list[Any], valid_doc_ids: set[str]
-) -> tuple[list[str], list[tuple[str, list[str]]], str, int, int]:
-    """메시지 기록에서 검색된 doc_id 목록(전체·도구 호출별), 근거 텍스트, 총 입·출력 토큰 수를 추출합니다."""
+) -> tuple[list[str], list[tuple[str, list[str]]], str]:
+    """메시지 기록에서 검색된 doc_id 목록(전체·도구 호출별)과 근거 텍스트를 추출합니다."""
     found: list[str] = []
     calls: list[tuple[str, list[str]]] = []  # 도구 호출 순서대로 (도구 이름, 그 호출이 돌려준 doc_id 순위)
     contexts: list[str] = []
-    prompt_tokens = 0
-    completion_tokens = 0
 
     def _add(doc_id: str | None) -> None:
         if doc_id and doc_id not in found:
             found.append(doc_id)
 
     for msg in messages:
-        if isinstance(msg, AIMessage):
-            usage = getattr(msg, "usage_metadata", None) or {}
-            prompt_tokens += int(usage.get("input_tokens", 0))
-            completion_tokens += int(usage.get("output_tokens", 0))
-
         if isinstance(msg, ToolMessage):
             raw = _content_to_str(msg.content)
             contexts.append(raw[:1500])
@@ -108,7 +103,7 @@ def _extract_tool_info(
                 if doc_id in raw:
                     _add(doc_id)
 
-    return found, calls, "\n---\n".join(contexts)[:3000], prompt_tokens, completion_tokens
+    return found, calls, "\n---\n".join(contexts)[:3000]
 
 
 def main() -> None:
@@ -123,6 +118,9 @@ def main() -> None:
     model_name = str(config.get("llm", {}).get("model", "gpt-4o-mini"))
     valid_doc_ids = _load_valid_doc_ids()
     top_k = int(config.get("retrieval", {}).get("top_k", 5))
+    # 비용 단가는 설정 파일의 llm.price_per_1m / judge_llm.price_per_1m 에 적습니다 (없으면 비용 칸이 빈칸).
+    answer_price = config.get("llm", {}).get("price_per_1m")
+    judge_price = (config.get("judge_llm") or {}).get("price_per_1m")
 
     questions_path = Path(args.questions)
     with questions_path.open(encoding="utf-8") as f:
@@ -160,17 +158,20 @@ def main() -> None:
         in_tok = 0
         out_tok = 0
 
-        try:
-            result = graph.invoke({"messages": [("user", question)]})
-            messages = result.get("messages", [])
-            if messages:
-                prediction = _content_to_str(messages[-1].content)
-            retrieved_ids, calls, context_text, in_tok, out_tok = _extract_tool_info(messages, valid_doc_ids)
-        except Exception as exc:
-            error_msg = f"{type(exc).__name__}: {exc}"
+        # 콜백으로 세면 도구 안의 LLM 호출(summarize_rfp 의 항목별 요약 등)까지 토큰에 들어갑니다.
+        with get_usage_metadata_callback() as usage_cb:
+            try:
+                result = graph.invoke({"messages": [("user", question)]})
+                messages = result.get("messages", [])
+                if messages:
+                    prediction = _content_to_str(messages[-1].content)
+                retrieved_ids, calls, context_text = _extract_tool_info(messages, valid_doc_ids)
+            except Exception as exc:
+                error_msg = f"{type(exc).__name__}: {exc}"
+        in_tok, out_tok = sum_usage(usage_cb.usage_metadata)
 
         latency = round(time.perf_counter() - start, 2)
-        cost_usd = estimate_token_cost(in_tok, out_tok, model=model_name)
+        cost_usd = estimate_token_cost(in_tok, out_tok, answer_price)
 
         # 검색 한 번의 top-k 기준 (유형별 계산은 metrics.retrieval_scores 참고)
         ret = retrieval_scores(q_type, calls, answer_doc_ids, k=top_k)
@@ -182,13 +183,17 @@ def main() -> None:
         ans_score = ans_res["answer_score"]
 
         judge_res: dict[str, Any] | None = None
+        judge_in = judge_out = 0
         if judge_llm is not None and not error_msg:
             ref_text = (
                 json.dumps(item["answer_facts"], ensure_ascii=False)
                 if q_type == "summary"
                 else str(item.get("answer", ""))
             )
-            judge_res = llm_judge(question, prediction, ref_text, context=context_text, llm=judge_llm)
+            with get_usage_metadata_callback() as judge_cb:
+                judge_res = llm_judge(question, prediction, ref_text, context=context_text, llm=judge_llm)
+            judge_in, judge_out = sum_usage(judge_cb.usage_metadata)
+        judge_cost = estimate_token_cost(judge_in, judge_out, judge_price) if judge_res is not None else None
 
         row = {
             "id": q_id,
@@ -208,8 +213,11 @@ def main() -> None:
             "judge_faithfulness": "" if judge_res is None else judge_res["faithfulness"],
             "judge_score": "" if judge_res is None else judge_res["score"],
             "latency_sec": latency,
-            "tokens": in_tok + out_tok,
-            "cost_usd": cost_usd,
+            "input_tokens": in_tok,
+            "output_tokens": out_tok,
+            "cost_usd": "" if cost_usd is None else cost_usd,
+            "judge_tokens": "" if judge_res is None else judge_in + judge_out,
+            "judge_cost_usd": "" if judge_cost is None else judge_cost,
             "detail": error_msg or ans_res["detail"],
             "prediction": prediction.replace("\n", " "),
         }
@@ -243,7 +251,12 @@ def main() -> None:
     ans_vals = [r["answer_score"] for r in rows]
     lat_vals = [r["latency_sec"] for r in rows]
     judge_vals = [r["judge_score"] for r in rows if r["judge_score"] != ""]
-    total_cost = round(sum(r["cost_usd"] for r in rows), 6)
+    def _total(key: str) -> float | None:
+        vals = [r[key] for r in rows if r[key] != ""]
+        return round(sum(vals), 6) if vals else None
+
+    total_cost = _total("cost_usd")
+    total_judge_cost = _total("judge_cost_usd")
 
     summary = {
         "config": args.config,
@@ -257,7 +270,10 @@ def main() -> None:
         "avg_answer_score": round(sum(ans_vals) / len(ans_vals), 4) if ans_vals else 0.0,
         "avg_llm_judge": round(sum(judge_vals) / len(judge_vals), 4) if judge_vals else None,
         "avg_latency_sec": round(sum(lat_vals) / len(lat_vals), 2) if lat_vals else 0.0,
+        "total_input_tokens": sum(r["input_tokens"] for r in rows),
+        "total_output_tokens": sum(r["output_tokens"] for r in rows),
         "total_cost_usd": total_cost,
+        "total_judge_cost_usd": total_judge_cost,
         "by_type": {
             t: {
                 "count": len(items),
@@ -281,7 +297,12 @@ def main() -> None:
     print(f"- 평균 답변 점수   : {summary['avg_answer_score']:.2%}")
     if summary["avg_llm_judge"] is not None:
         print(f"- LLM Judge 점수   : {summary['avg_llm_judge']:.2%}")
-    print(f"- 평균 응답 시간   : {summary['avg_latency_sec']:.2f}초 (총 비용: ${total_cost:.4f})")
+    def _usd(v: float | None) -> str:
+        return "단가 미설정" if v is None else f"${v:.4f}"
+
+    print(f"- 평균 응답 시간   : {summary['avg_latency_sec']:.2f}초")
+    print(f"- 토큰 (입력/출력) : {summary['total_input_tokens']:,} / {summary['total_output_tokens']:,}")
+    print(f"- 비용 (답변/채점) : {_usd(total_cost)} / {_usd(total_judge_cost)}")
     print("-" * 68)
     for t, stat in summary["by_type"].items():
         print(f"  · {t:<18} ({stat['count']:2d}문항) : 답변 {stat['avg_answer_score']:.2%} | 평균 {stat['avg_latency_sec']:.2f}초")
