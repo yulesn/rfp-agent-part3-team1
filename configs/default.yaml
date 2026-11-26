@@ -25,16 +25,16 @@ retrieval:
   top_k: 5
 
 llm:
-  provider: ollama               # GCP VM Ollama 서버 (SSH 터널 필요)
-  model: gemma4:12b
-  base_url: http://localhost:11434
-  num_ctx: 8192
+  provider: openai
+  model: gpt-5-mini
   temperature: 0
+  price_per_1m: {input: 0.25, output: 2.0} 
 
 judge_llm:
   provider: openai
   model: gpt-5-mini
   temperature: 0
+  price_per_1m: {input: 0.25, output: 2.0}   
 
 agent:
   show_trace: false              # true 면 답변 끝에 모든 LLM 호출(프롬프트·출력) 표시 (개발용)
