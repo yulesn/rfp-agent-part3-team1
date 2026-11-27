@@ -1,9 +1,11 @@
 """후속 질문 대화: thread_id 별 대화 유지, 대화 중인 공고(current_doc_id)로 검색 범위 고정,
-이전 턴의 도구 결과 원문·오래된 턴 제외를 API 없이 확인합니다."""
+이전 턴의 도구 결과 원문·오래된 턴 제외를 외부 서비스 없이 확인합니다."""
 
 from importlib import import_module
 from pathlib import Path
 
+import httpx
+from fastapi.testclient import TestClient
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from streamlit.testing.v1 import AppTest
@@ -11,6 +13,7 @@ from streamlit.testing.v1 import AppTest
 from rfp_agent.agent import graph
 from rfp_agent.agent.nodes import TRACE_MARKER, history_view, track_doc
 from rfp_agent.agent.tools.search_rfp import search_rfp
+from rfp_agent.api import main as api
 
 search_module = import_module("rfp_agent.agent.tools.search_rfp")
 CONFIG = {"retrieval": {"top_k": 2}}
@@ -89,19 +92,23 @@ def test_streamlit_displays_evidence_for_each_turn(monkeypatch):
         plans=[{"query": "예산"}, {"query": "참가 자격"}, None],
         results=[[first_chunk, first_chunk], [follow_up_chunk]],
     )
-    monkeypatch.setattr(graph, "build_graph", lambda *args, **kwargs: agent)
-    monkeypatch.setattr("rfp_agent.config.load_config", lambda: CONFIG)
+    monkeypatch.setattr(api, "_graph", agent)
+    client = TestClient(api.app, base_url="http://localhost:8000")
+    monkeypatch.setattr(httpx, "get", lambda url, *, timeout: client.get(url))
+    monkeypatch.setattr(httpx, "post", lambda url, *, json, timeout: client.post(url, json=json))
 
     path = Path(__file__).resolve().parents[1] / "app" / "streamlit_app.py"
-    app = AppTest.from_file(str(path)).run()
+    app = AppTest.from_file(str(path), default_timeout=15).run()
     app.chat_input[0].set_value("공고의 예산은?").run()
     assert not app.exception
+    assert not app.error
     assert app.expander[0].label == "검색된 원문 근거 보기 (1개)"
     assert app.expander[0].get("text")[0].value == "예산 근거"
     assert "쪽" not in app.expander[0].get("caption")[0].value
 
     app.chat_input[0].set_value("그럼 참가 자격은?").run()
     assert not app.exception
+    assert not app.error
     assert calls == [None, {"doc_id": "a.pdf"}]
     assert len(app.expander) == 2
     assert [entry.value for entry in app.expander[1].get("text")] == ["참가 자격 근거"]
@@ -109,6 +116,7 @@ def test_streamlit_displays_evidence_for_each_turn(monkeypatch):
 
     app.chat_input[0].set_value("고마워").run()
     assert not app.exception
+    assert not app.error
     assert len(app.expander) == 2  # 검색하지 않은 답변에는 이전 근거를 붙이지 않습니다.
 
 

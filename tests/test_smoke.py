@@ -24,12 +24,17 @@ def test_imports():
     import rfp_agent.retrieval.retriever  # noqa: F401
 
 
-def test_api_health():
+def test_api_health(monkeypatch):
     from fastapi.testclient import TestClient
 
-    from rfp_agent.api.main import app
+    from rfp_agent.api import main as api
 
-    assert TestClient(app).get("/health").json() == {"status": "ok"}
+    llm = {"provider": "ollama", "model": "gemma4:12b"}
+    monkeypatch.setattr(api, "load_config", lambda: {"llm": llm})
+    response = TestClient(api.app).get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", **llm}
 
 
 def test_get_llm_ollama():
