@@ -65,6 +65,10 @@ def _load_valid_doc_ids(documents_path: str = "data/processed/documents.jsonl") 
     return doc_ids
 
 
+# LLM judge 에 넘기는 검색 근거 최대 길이(글자). 너무 짧으면 실제 근거가 잘려 faithfulness 가 낮게 나옵니다.
+JUDGE_CONTEXT_CHARS = 12000
+
+
 def _extract_tool_info(
     messages: list[Any], valid_doc_ids: set[str]
 ) -> tuple[list[str], list[tuple[str, list[str]]], str]:
@@ -80,7 +84,7 @@ def _extract_tool_info(
     for msg in messages:
         if isinstance(msg, ToolMessage):
             raw = _content_to_str(msg.content)
-            contexts.append(raw[:1500])
+            contexts.append(raw)
 
             # search_rfp 는 검색된 doc_id 목록을 artifact 로 돌려줍니다 (순위 그대로).
             artifact = getattr(msg, "artifact", None)
@@ -103,7 +107,7 @@ def _extract_tool_info(
                 if doc_id in raw:
                     _add(doc_id)
 
-    return found, calls, "\n---\n".join(contexts)[:3000]
+    return found, calls, "\n---\n".join(contexts)[:JUDGE_CONTEXT_CHARS]
 
 
 def main() -> None:
@@ -191,7 +195,9 @@ def main() -> None:
                 else str(item.get("answer", ""))
             )
             with get_usage_metadata_callback() as judge_cb:
-                judge_res = llm_judge(question, prediction, ref_text, context=context_text, llm=judge_llm)
+                judge_res = llm_judge(
+                    question, prediction, ref_text, context=context_text, llm=judge_llm, q_type=q_type
+                )
             judge_in, judge_out = sum_usage(judge_cb.usage_metadata)
         judge_cost = estimate_token_cost(judge_in, judge_out, judge_price) if judge_res is not None else None
 
