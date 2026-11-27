@@ -1,56 +1,30 @@
 """[프론트·백엔드·평가] FastAPI 서버
 
-- 에이전트(build_graph)를 HTTP API로 감싸는 파일입니다. UI와 평가 스크립트는 이 API를 호출합니다.
-- 그래프와 벡터DB는 서버가 켜질 때 한 번만 만들고, 요청마다 재사용합니다.
-
 실행:  uv run uvicorn rfp_agent.api.main:app --reload --port 8000
 확인:  브라우저에서 http://localhost:8000/docs
 """
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 
-from rfp_agent.agent.graph import build_graph
+from rfp_agent.agent.graph import build_graph, new_memory
 from rfp_agent.api.schemas import AskRequest, AskResponse, Source
 from rfp_agent.config import load_config
 
 app = FastAPI(title="RFP RAG 에이전트 API")
 
 _graph = None
-_doc_titles: dict[str, str] | None = None
-
-
-def _load_doc_titles() -> dict[str, str]:
-    global _doc_titles
-    if _doc_titles is not None:
-        return _doc_titles
-
-    titles: dict[str, str] = {}
-    docs_path = Path("data/documents.jsonl")
-    if docs_path.exists():
-        with docs_path.open(encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                row = json.loads(line)
-                doc_id = row.get("doc_id", "")
-                meta = row.get("metadata") or {}
-                titles[doc_id] = meta.get("title") or doc_id.rsplit(".", 1)[0]
-    _doc_titles = titles
-    return _doc_titles
 
 
 def get_graph():
     global _graph
     if _graph is None:
-        _graph = build_graph(load_config())
+        _graph = build_graph(load_config(), checkpointer=new_memory())
     return _graph
 
 
@@ -66,54 +40,63 @@ def _content_to_str(content: Any) -> str:
 
 
 def _extract_sources(messages: list[Any]) -> list[Source]:
-    doc_titles = _load_doc_titles()
-    sources: list[Source] = []
-    seen: set[tuple[str, str]] = set()
+    """이번 질문(마지막 HumanMessage 이후) search_rfp artifact['evidence']만 추출합니다."""
+    for index in range(len(messages) - 1, -1, -1):
+        if isinstance(messages[index], HumanMessage):
+            break
+    else:
+        return []
 
-    for msg in messages:
-        if not isinstance(msg, ToolMessage):
+    unique: dict[tuple[Any, Any], Source] = {}
+    for message in messages[index + 1 :]:
+        if not isinstance(message, ToolMessage) or message.name != "search_rfp":
             continue
-        raw = _content_to_str(msg.content)
-
-        # JSON 형태 도구 결과 파싱
-        try:
-            parsed = json.loads(raw)
-            items = parsed if isinstance(parsed, list) else parsed.get("results", [parsed])
-            for item in items:
+        if isinstance(message.artifact, dict):
+            for item in message.artifact.get("evidence", []):
                 if not isinstance(item, dict):
                     continue
-                meta = item.get("metadata") or {}
-                doc_id = item.get("doc_id") or item.get("source") or meta.get("doc_id") or ""
-                snippet = str(item.get("snippet") or item.get("text") or item.get("content") or "")[:300]
-                title = item.get("title") or meta.get("title") or doc_titles.get(doc_id, doc_id)
-                if doc_id and (doc_id, snippet[:60]) not in seen:
-                    seen.add((doc_id, snippet[:60]))
-                    sources.append(Source(doc_id=doc_id, title=title, snippet=snippet))
-            if sources:
-                continue
-        except Exception:
-            pass
+                source = str(item.get("source") or "").strip()
+                chunk_id = item.get("chunk_id")
+                page_num = item.get("page_num")
+                text = str(item.get("text") or "").strip()
 
-        # 일반 텍스트 도구 결과에서 doc_id 매칭
-        for doc_id, title in doc_titles.items():
-            if doc_id in raw and (doc_id, raw[:60]) not in seen:
-                seen.add((doc_id, raw[:60]))
-                sources.append(Source(doc_id=doc_id, title=title, snippet=raw[:300]))
+                key = (source, chunk_id or text)
+                if (source or text) and key not in unique:
+                    unique[key] = Source(
+                        doc_id=source,
+                        title=source,
+                        snippet=text,
+                        chunk_id=chunk_id,
+                        page_num=page_num if type(page_num) is int else None,
+                    )
 
-    return sources
+    return list(unique.values())
 
 
 @app.get("/health")
 def health() -> dict:
-    """서버가 살아 있는지 확인"""
-    return {"status": "ok"}
+    """서버가 살아 있는지와 현재 연결된 LLM 모델명을 확인합니다."""
+    cfg = load_config()
+    llm_cfg = cfg.get("llm") or {}
+    return {
+        "status": "ok",
+        "provider": llm_cfg.get("provider", ""),
+        "model": llm_cfg.get("model", ""),
+    }
 
 
 @app.post("/ask", response_model=AskResponse)
 def ask(req: AskRequest) -> AskResponse:
+    thread_id = req.thread_id or str(uuid4())
     try:
         graph = get_graph()
-        result = graph.invoke({"messages": [("user", req.question)]})
+        result = graph.invoke(
+            {"messages": [("user", req.question)]},
+            {
+                "configurable": {"thread_id": thread_id},
+                "recursion_limit": 16,
+            },
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"에이전트 실행 오류: {exc}") from exc
 
