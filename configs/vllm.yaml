@@ -1,0 +1,43 @@
+# default.yaml 에서 llm 만 vLLM(qwen3.5 9B)으로 바꾼 설정. Ollama(gemma4) 와 비교 실험용
+# (vLLM 은 gemma4 를 지원하지 않아 qwen 사용)
+# 먼저 SSH 터널: ssh -L 8000:localhost:8000 spai1413@<VM 외부 IP>
+# 실행: uv run python scripts/ask.py "질문" --config configs/vllm.yaml
+
+paths:
+  raw_dir: data/raw              # RFP 원본 (hwp, pdf)
+  metadata_file: data/raw/data_list.csv   # 제공받은 메타데이터 파일 (이름은 받은 파일에 맞게 수정)
+  processed_dir: data/processed  # 파싱 결과 (jsonl)
+  vectorstore_dir: data/vectorstore  # Chroma 저장 위치
+
+chunking:
+  chunk_size: 1000
+  chunk_overlap: 200
+
+embedding:
+  provider: openai               # openai | huggingface
+  model: text-embedding-3-small
+
+vectorstore:
+  collection_name: rfp
+
+retrieval:
+  top_k: 5
+
+llm:
+  provider: vllm                 # GCP VM vLLM 서버 (OpenAI 호환, SSH 터널 필요)
+  model: Qwen/Qwen3.5-9B         # vLLM 에 띄운 모델 이름. curl localhost:8000/v1/models 의 id 와 똑같이
+  base_url: http://localhost:8000/v1
+  api_key: EMPTY
+  enable_thinking: false         # 생각 토큰 끄기 (켜면 느리고, 길면 빈 답이 나옴)
+  temperature: 0
+  price_per_1m: {input: 0, output: 0}   # 1M 토큰당 USD. 로컬 모델이라 0
+
+judge_llm:
+  provider: openai
+  model: gpt-5-mini
+  temperature: 0
+  price_per_1m: {input: 0.25, output: 2.0} 
+
+agent:
+  show_trace: false              # true 면 답변 끝에 모든 LLM 호출(프롬프트·출력) 표시 (개발용)
+  max_tool_calls: 15             # 질문 하나당 도구 호출 상한. 넘으면 지금까지 찾은 근거로 답함 (0 이면 제한 없음)
