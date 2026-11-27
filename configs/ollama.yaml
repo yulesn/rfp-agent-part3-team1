@@ -38,3 +38,4 @@ judge_llm:
 
 agent:
   show_trace: false              # true 면 답변 끝에 모든 LLM 호출(프롬프트·출력) 표시 (개발용)
+  max_tool_calls: 15             # 질문 하나당 도구 호출 상한. 넘으면 지금까지 찾은 근거로 답함 (0 이면 제한 없음)
