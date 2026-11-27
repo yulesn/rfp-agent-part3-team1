@@ -66,7 +66,26 @@ def _load_valid_doc_ids(documents_path: str = "data/processed/documents.jsonl") 
 
 
 # LLM judge 에 넘기는 검색 근거 최대 길이(글자). 너무 짧으면 실제 근거가 잘려 faithfulness 가 낮게 나옵니다.
-JUDGE_CONTEXT_CHARS = 12000
+# search_rfp 한 번이 약 5천 자라, 검색을 10번 넘게 해도 대부분 들어가도록 넉넉히 잡습니다.
+JUDGE_CONTEXT_CHARS = 60000
+
+
+def _context_pieces(msg: ToolMessage, raw: str) -> list[tuple[str, str]]:
+    """도구 결과를 (중복 판정 키, judge 에 넘길 텍스트) 조각으로 나눕니다.
+
+    search_rfp 는 artifact 의 evidence 를 청크 단위로 쪼개서, 여러 번 검색돼도 같은 청크는 한 번만 넣습니다.
+    그 외 도구는 결과 전체를 한 조각으로 봅니다.
+    """
+    artifact = getattr(msg, "artifact", None)
+    evidence = artifact.get("evidence") if isinstance(artifact, dict) else None
+    if not evidence:
+        return [(raw, raw)]
+    pieces = []
+    for ev in evidence:
+        text = str(ev.get("text", ""))
+        key = f"{ev.get('source')}|{ev.get('chunk_id')}" if ev.get("chunk_id") else text
+        pieces.append((key, f"출처: {ev.get('source', '출처 미상')} | 청크: {ev.get('chunk_id', '미상')}\n{text}"))
+    return pieces
 
 
 def _extract_tool_info(
@@ -76,6 +95,7 @@ def _extract_tool_info(
     found: list[str] = []
     calls: list[tuple[str, list[str]]] = []  # 도구 호출 순서대로 (도구 이름, 그 호출이 돌려준 doc_id 순위)
     contexts: list[str] = []
+    seen_context: set[str] = set()
 
     def _add(doc_id: str | None) -> None:
         if doc_id and doc_id not in found:
@@ -84,7 +104,10 @@ def _extract_tool_info(
     for msg in messages:
         if isinstance(msg, ToolMessage):
             raw = _content_to_str(msg.content)
-            contexts.append(raw)
+            for key, text in _context_pieces(msg, raw):
+                if key not in seen_context:
+                    seen_context.add(key)
+                    contexts.append(text)
 
             # search_rfp 는 검색된 doc_id 목록을 artifact 로 돌려줍니다 (순위 그대로).
             artifact = getattr(msg, "artifact", None)
