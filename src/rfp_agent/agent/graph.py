@@ -15,7 +15,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from rfp_agent.agent.nodes import DEFAULT_HISTORY_TURNS, make_call_model, track_doc
+from rfp_agent.agent.nodes import DEFAULT_HISTORY_TURNS, DEFAULT_MAX_TOOL_CALLS, make_call_model, track_doc
 from rfp_agent.agent.state import AgentState
 from rfp_agent.agent.tools import ALL_TOOLS
 from rfp_agent.agent.tools.filter_metadata import filter_rfp_by_metadata, make_filter_rfp_by_metadata
@@ -45,14 +45,17 @@ def build_graph(config: dict, *, tools=None, checkpointer=None):
     configured = [
         next((make(config) for base, make in factories if item is base), item) for item in selected
     ]
-    llm_with_tools = get_llm(config).bind_tools(configured)
+    llm = get_llm(config)
+    llm_with_tools = llm.bind_tools(configured)
 
     graph = StateGraph(AgentState)
     history_turns = config.get("agent", {}).get("history_turns", DEFAULT_HISTORY_TURNS)
+    max_tool_calls = config.get("agent", {}).get("max_tool_calls", DEFAULT_MAX_TOOL_CALLS)
     # 개발용: 모든 LLM 호출(도구 안의 호출 포함)을 기록해 최종 답변 끝에 붙입니다.
     recorder = LLMCallRecorder() if config.get("agent", {}).get("show_trace", False) else None
     graph.add_node("agent", make_call_model(
-        llm_with_tools, history_turns=history_turns, recorder=recorder))
+        llm_with_tools, history_turns=history_turns, recorder=recorder,
+        llm=llm, max_tool_calls=max_tool_calls))
     graph.add_node("tools", ToolNode(configured))
     graph.add_node("track_doc", track_doc)
 
