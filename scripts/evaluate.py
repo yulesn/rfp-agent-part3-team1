@@ -65,6 +65,10 @@ def _load_valid_doc_ids(documents_path: str = "data/processed/documents.jsonl") 
     return doc_ids
 
 
+# LLM judge 에 넘기는 검색 근거 최대 길이(글자). 너무 짧으면 실제 근거가 잘려 faithfulness 가 낮게 나옵니다.
+JUDGE_CONTEXT_CHARS = 12000
+
+
 def _extract_tool_info(
     messages: list[Any], valid_doc_ids: set[str]
 ) -> tuple[list[str], list[tuple[str, list[str]]], str]:
@@ -80,7 +84,7 @@ def _extract_tool_info(
     for msg in messages:
         if isinstance(msg, ToolMessage):
             raw = _content_to_str(msg.content)
-            contexts.append(raw[:1500])
+            contexts.append(raw)
 
             # search_rfp 는 검색된 doc_id 목록을 artifact 로 돌려줍니다 (순위 그대로).
             artifact = getattr(msg, "artifact", None)
@@ -103,7 +107,7 @@ def _extract_tool_info(
                 if doc_id in raw:
                     _add(doc_id)
 
-    return found, calls, "\n---\n".join(contexts)[:3000]
+    return found, calls, "\n---\n".join(contexts)[:JUDGE_CONTEXT_CHARS]
 
 
 def main() -> None:
@@ -191,7 +195,9 @@ def main() -> None:
                 else str(item.get("answer", ""))
             )
             with get_usage_metadata_callback() as judge_cb:
-                judge_res = llm_judge(question, prediction, ref_text, context=context_text, llm=judge_llm)
+                judge_res = llm_judge(
+                    question, prediction, ref_text, context=context_text, llm=judge_llm, q_type=q_type
+                )
             judge_in, judge_out = sum_usage(judge_cb.usage_metadata)
         judge_cost = estimate_token_cost(judge_in, judge_out, judge_price) if judge_res is not None else None
 
@@ -258,6 +264,11 @@ def main() -> None:
     total_cost = _total("cost_usd")
     total_judge_cost = _total("judge_cost_usd")
 
+    def _avg(items: list[dict[str, Any]], key: str, digits: int = 4) -> float | None:
+        """빈칸("")은 빼고 평균. 값이 하나도 없으면 None (예: 정답 문서가 없는 유형의 hit)."""
+        vals = [x[key] for x in items if x[key] != ""]
+        return round(sum(vals) / len(vals), digits) if vals else None
+
     summary = {
         "config": args.config,
         "model": model_name,
@@ -277,8 +288,15 @@ def main() -> None:
         "by_type": {
             t: {
                 "count": len(items),
-                "avg_answer_score": round(sum(x["answer_score"] for x in items) / len(items), 4),
-                "avg_latency_sec": round(sum(x["latency_sec"] for x in items) / len(items), 2),
+                "avg_hit_at_k": _avg(items, "hit_at_k"),
+                "avg_mrr": _avg(items, "mrr"),
+                "avg_recall_at_k": _avg(items, "recall_at_k"),
+                "avg_hit_any": _avg(items, "hit_any"),
+                "avg_answer_score": _avg(items, "answer_score"),
+                "avg_llm_judge": _avg(items, "judge_score"),
+                "avg_judge_accuracy": _avg(items, "judge_accuracy"),
+                "avg_judge_faithfulness": _avg(items, "judge_faithfulness"),
+                "avg_latency_sec": _avg(items, "latency_sec", digits=2),
             }
             for t, items in sorted(by_type.items())
         },
@@ -305,7 +323,12 @@ def main() -> None:
     print(f"- 비용 (답변/채점) : {_usd(total_cost)} / {_usd(total_judge_cost)}")
     print("-" * 68)
     for t, stat in summary["by_type"].items():
-        print(f"  · {t:<18} ({stat['count']:2d}문항) : 답변 {stat['avg_answer_score']:.2%} | 평균 {stat['avg_latency_sec']:.2f}초")
+        pct = lambda v: "-" if v is None else f"{v:.0%}"
+        print(
+            f"  · {t:<18} ({stat['count']:2d}문항) : Hit {pct(stat['avg_hit_at_k'])} | "
+            f"Recall {pct(stat['avg_recall_at_k'])} | 답변 {pct(stat['avg_answer_score'])} | "
+            f"Judge {pct(stat['avg_llm_judge'])} | 평균 {stat['avg_latency_sec']:.2f}초"
+        )
     print("=" * 68)
     print(f"상세 CSV 저장됨 : {csv_path}")
     print(f"요약 JSON 저장됨: {summary_path}")

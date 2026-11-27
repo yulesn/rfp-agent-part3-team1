@@ -120,11 +120,14 @@ def score_unanswerable(answer: str) -> float:
 
 
 def _first_call(calls: list[tuple[str, list[str]]], tool_name: str) -> list[str]:
-    """tool_name 의 첫 호출 결과. 그 도구를 안 썼으면 첫 도구 호출 결과를 씁니다."""
+    """tool_name 의 첫 호출 결과. 그 도구를 안 썼으면 문서를 1개 이상 돌려준 첫 도구 호출 결과를 씁니다.
+
+    (예: filter_rfp_by_metadata 를 0건 → 1건 순서로 불렀으면 1건짜리를 봄)
+    """
     for name, doc_ids in calls:
         if name == tool_name:
             return doc_ids
-    return calls[0][1] if calls else []
+    return next((doc_ids for _, doc_ids in calls if doc_ids), [])
 
 
 def retrieval_scores(
@@ -224,8 +227,12 @@ def llm_judge(
     reference: str,
     context: str = "",
     llm: Any = None,
+    q_type: str = "",
 ) -> dict[str, Any]:
-    """LLM-as-a-judge 채점: reason을 먼저 작성한 뒤 accuracy와 faithfulness를 0.0~1.0으로 평가합니다."""
+    """LLM-as-a-judge 채점: reason을 먼저 작성한 뒤 accuracy와 faithfulness를 0.0~1.0으로 평가합니다.
+
+    summary 문항은 항목이 여러 개라, 하나만 빠져도 0점이 되지 않도록 맞힌 항목 비율로 accuracy 를 줍니다.
+    """
     if llm is None:
         from rfp_agent.config import load_config
         from rfp_agent.llm import get_llm
@@ -233,13 +240,23 @@ def llm_judge(
         llm = get_llm(load_config())
 
     context_block = context if context.strip() else "(검색된 근거 없음)"
+    if q_type == "summary":
+        accuracy_rule = (
+            "   - [정답(Reference)]은 항목별 정답(JSON)입니다. 항목마다 모델 답변이 정답의 핵심 사실·수치를 맞게 썼는지 보고,\n"
+            "     맞힌 항목 수 / 전체 항목 수를 accuracy 로 주세요. 정답이 있는데 '문서에 명시 없음'이라고 쓴 항목은 틀린 것으로 셉니다.\n"
+            "     reason 에는 틀리거나 빠진 항목 이름을 적으세요.\n"
+        )
+    else:
+        accuracy_rule = (
+            "   - 정답에 구체적인 사실·수치·명칭이 있는데 모델이 '문서에 명시 없음', '확인할 수 없음' 등으로 답하거나 핵심 사실을 누락·왜곡하면 accuracy는 반드시 0.0입니다.\n"
+        )
     prompt = (
         "당신은 공공 입찰공고 RAG 시스템의 엄격한 답변 채점관입니다.\n"
         "아래 규칙에 따라 모델 답변을 평가하고, 반드시 JSON 한 줄로만 출력하세요.\n\n"
         "[채점 규칙]\n"
         "1. reason: 채점 근거를 한국어 한 줄로 먼저 작성하세요.\n"
         "2. accuracy (정확성, 0.0~1.0): 오직 [질문]과 [정답(Reference)]만 비교하세요. [검색된 근거 문서]는 절대 참고하지 마세요.\n"
-        "   - 정답에 구체적인 사실·수치·명칭이 있는데 모델이 '문서에 명시 없음', '확인할 수 없음' 등으로 답하거나 핵심 사실을 누락·왜곡하면 accuracy는 반드시 0.0입니다.\n"
+        f"{accuracy_rule}"
         "3. faithfulness (근거 충실도, 0.0~1.0): 오직 [검색된 근거 문서]만 기준으로, 모델 답변이 근거에 없는 내용을 임의로 지어내지(환각) 않았는지 평가하세요.\n\n"
         '출력 형식 예시: {"reason": "정답은 KCMVP이나 모델이 문서에 명시 없음이라고 오답을 냄", "accuracy": 0.0, "faithfulness": 1.0}\n\n'
         f"[질문] {question}\n"

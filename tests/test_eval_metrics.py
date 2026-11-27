@@ -25,6 +25,15 @@ def test_summary_uses_summarize_rfp_pick():
     assert retrieval_scores("summary", [("summarize_rfp", ["x"])], ["a"])["hit_at_k"] == 0.0
 
 
+def test_fallback_skips_empty_calls():
+    # search_rfp 없이 filter 만 썼으면 결과가 있는 첫 호출을 봄
+    calls = [("filter_rfp_by_metadata", []), ("filter_rfp_by_metadata", ["a"])]
+    assert retrieval_scores("single_doc", calls, ["a"])["hit_at_k"] == 1.0
+    # search_rfp 를 썼는데 비어 있으면 그대로 0 (진짜 못 찾은 것)
+    calls = [("search_rfp", []), ("filter_rfp_by_metadata", ["a"])]
+    assert retrieval_scores("single_doc", calls, ["a"])["hit_at_k"] == 0.0
+
+
 def test_no_answer_doc_or_no_calls():
     assert retrieval_scores("unanswerable", [("search_rfp", ["a"])], [])["hit_at_k"] is None
     assert retrieval_scores("single_doc", [], ["a"])["hit_at_k"] == 0.0
